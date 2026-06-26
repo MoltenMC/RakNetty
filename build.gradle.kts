@@ -90,17 +90,18 @@ subprojects {
     }
 
     extensions.configure<SigningExtension> {
-        // Gradle 프로퍼티와 시스템 환경 변수를 모두 안전하게 조회하도록 개선
-        val signingKeyId = (project.findProperty("signingKeyId") as? String) ?: System.getenv("ORG_GRADLE_PROJECT_signingKeyId") ?: System.getenv("SIGNING_KEY_ID")
-        val signingKey = (project.findProperty("signingKey") as? String) ?: System.getenv("ORG_GRADLE_PROJECT_signingKey") ?: System.getenv("SIGNING_KEY")
-        val signingPassword = (project.findProperty("signingPassword") as? String) ?: System.getenv("ORG_GRADLE_PROJECT_signingPassword") ?: System.getenv("SIGNING_PASSWORD")
+        // 1. 세 가지 변수를 모두 안전하게 환경 변수에서 가져옵니다
+        val signingKeyId = System.getenv("SIGNING_KEY_ID")
+        val signingKey = System.getenv("SIGNING_KEY")
+        val signingPassword = System.getenv("SIGNING_PASSWORD")
 
         if (!signingKey.isNullOrBlank() && !signingPassword.isNullOrBlank()) {
-            // 인메모리 서명 시 Key ID를 명시적으로 넘겨주어야 무한 행(Hang) 현상을 방지할 수 있습니다.
+            // 2. 인자 3개짜리 메서드를 사용하여 Key ID를 강제로 맵핑합니다.
+            // 인자 순서: useInMemoryPgpKeys(keyId, secretKey, password)
             useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
             sign(extensions.getByType<PublishingExtension>().publications["mavenJava"])
         } else {
-            logger.warn("[$name] Signing credentials not found. Skipping signature.")
+            logger.warn("[$name] Signing credentials missing. Skipping signing task.")
         }
     }
 }
