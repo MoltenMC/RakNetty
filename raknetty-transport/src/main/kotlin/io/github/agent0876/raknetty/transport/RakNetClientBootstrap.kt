@@ -93,6 +93,6 @@ class RakNetClientBootstrap {
             )
         }
 
-        return connectPromise as Future<Void>
+        return connectPromise.asFuture()
     }
 }
