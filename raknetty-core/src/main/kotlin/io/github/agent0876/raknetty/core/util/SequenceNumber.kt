@@ -15,7 +15,7 @@ object SequenceNumber {
     /** Returns `true` if [a] is strictly more recent than [b] (wrap-aware). */
     fun isGreaterThan(a: Int, b: Int): Boolean {
         val diff = (a - b) and MAX
-        return diff in 1 until HALF
+        return diff > 0 && diff < HALF
     }
 
     /** Forward distance from [older] to [newer] modulo 2^24. */

@@ -47,8 +47,7 @@ object RakNetFrameCodec {
             SplitInfo(splitId = id, splitCount = count, splitIndex = index)
         } else null
 
-        val payload = alloc.buffer(payloadLen)
-        buf.readBytes(payload, payloadLen)
+        val payload = buf.readRetainedSlice(payloadLen)
 
         return RakNetFrame(
             reliability    = reliability,

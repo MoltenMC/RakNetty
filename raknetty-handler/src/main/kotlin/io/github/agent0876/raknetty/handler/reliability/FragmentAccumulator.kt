@@ -1,9 +1,9 @@
 package io.github.agent0876.raknetty.handler.reliability
 
 import io.github.agent0876.raknetty.core.packet.RakNetFrame
+import io.github.agent0876.raknetty.core.protocol.RakNetProtocol
 import io.netty.buffer.ByteBuf
 import io.netty.buffer.ByteBufAllocator
-import java.util.HashMap
 
 /**
  * Reassembles split (fragmented) RakNet messages.
@@ -34,23 +34,26 @@ class FragmentAccumulator {
      * or `null` when more fragments are still expected. The returned [ByteBuf] is
      * a composite owned by the caller — caller must release it.
      *
-     * [frame.payload] is copied internally; callers must still release [frame.payload]
+     * [frame.payload] is retained internally; callers must still release [frame.payload]
      * themselves after this call returns.
      */
     fun accumulate(frame: RakNetFrame, alloc: ByteBufAllocator): ByteBuf? {
         val split = requireNotNull(frame.split) { "Frame must have SplitInfo" }
+        require(split.splitCount in 1..RakNetProtocol.MAX_SPLIT_COUNT) {
+            "splitCount ${split.splitCount} exceeds MAX_SPLIT_COUNT=${RakNetProtocol.MAX_SPLIT_COUNT}"
+        }
         val set = sets.getOrPut(split.splitId) {
             FragmentSet(split.splitId, split.splitCount, System.currentTimeMillis())
         }
 
         if (set.fragments[split.splitIndex] != null) return null // duplicate fragment
 
-        set.fragments[split.splitIndex] = frame.payload.copy()
+        set.fragments[split.splitIndex] = frame.payload.retain()
         set.received++
 
         if (set.received < set.splitCount) return null
 
-        // All fragments received — reassemble zero-copy via composite buffer
+        // All fragments received — reassemble via composite buffer
         sets.remove(split.splitId)
         val composite = alloc.compositeBuffer(set.splitCount)
         for (i in 0 until set.splitCount) {

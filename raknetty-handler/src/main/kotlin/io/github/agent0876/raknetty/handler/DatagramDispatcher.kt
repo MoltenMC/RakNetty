@@ -26,28 +26,28 @@ class DatagramDispatcher(
 ) : SimpleChannelInboundHandler<DatagramPacket>(false) {
 
     override fun channelRead0(ctx: ChannelHandlerContext, msg: DatagramPacket) {
-        val buf    = msg.content()
-        val sender = msg.sender() as InetSocketAddress
+        try {
+            val buf    = msg.content()
+            val sender = msg.sender() as InetSocketAddress
 
-        if (!buf.isReadable) return
+            if (!buf.isReadable) return
 
-        val firstByte = buf.getUnsignedByte(buf.readerIndex()).toInt()
+            val firstByte = buf.getUnsignedByte(buf.readerIndex()).toInt()
 
-        if (RakNetDatagramCodec.isOnlineDatagram(firstByte)) {
-            val conn = registry.get(sender) ?: return
-            try {
-                val datagram = RakNetDatagramCodec.decode(buf, ctx.alloc())
-                conn.onDatagramReceived(ctx, datagram)
-            } catch (_: InvalidPacketException) { /* drop malformed datagram */ }
-        } else {
-            try {
-                val packet = OfflinePacketCodec.decode(buf) ?: return
-                ctx.fireChannelRead(AddressedOfflinePacket(packet, sender))
-            } catch (_: InvalidPacketException) { /* drop unknown offline packet */ }
+            if (RakNetDatagramCodec.isOnlineDatagram(firstByte)) {
+                val conn = registry.get(sender) ?: return
+                try {
+                    val datagram = RakNetDatagramCodec.decode(buf, ctx.alloc())
+                    conn.onDatagramReceived(ctx, datagram)
+                } catch (_: InvalidPacketException) { /* drop malformed datagram */ }
+            } else {
+                try {
+                    val packet = OfflinePacketCodec.decode(buf) ?: return
+                    ctx.fireChannelRead(AddressedOfflinePacket(packet, sender))
+                } catch (_: InvalidPacketException) { /* drop unknown offline packet */ }
+            }
+        } finally {
+            msg.release()
         }
-    }
-
-    override fun exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
-        ctx.fireExceptionCaught(cause)
     }
 }

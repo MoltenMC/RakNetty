@@ -25,6 +25,7 @@ import io.netty.channel.ChannelFuture
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.socket.DatagramPacket
 import java.net.InetSocketAddress
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /**
@@ -52,6 +53,7 @@ class RakNetConnectionImpl(
     private var lastRecvTime     = System.currentTimeMillis()
     private var lastPingSentTime = 0L
     private var nextSplitId      = 0
+    private var tickerFuture: ScheduledFuture<*>? = null
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -60,7 +62,7 @@ class RakNetConnectionImpl(
      * Must be called once after the connection is added to [ConnectionRegistry].
      */
     fun startTicker() {
-        channel.eventLoop().scheduleAtFixedRate(
+        tickerFuture = channel.eventLoop().scheduleAtFixedRate(
             { if (state != ConnectionState.DISCONNECTED) tick() },
             config.tickIntervalMs,
             config.tickIntervalMs,
@@ -107,7 +109,6 @@ class RakNetConnectionImpl(
                 receiveBuffer.onDatagramArrived(datagram.sequenceNumber)
                     ?.let { (s, e) -> sendBuffer.nakRange(s, e) }
                 for (frame in datagram.frames) processFrame(ctx, frame)
-                datagram.release()
             }
         }
     }
@@ -124,12 +125,11 @@ class RakNetConnectionImpl(
 
         // Fragment reassembly
         val payload: ByteBuf = if (frame.split != null) {
-            fragmentAccum.accumulate(frame, channel.alloc()) ?: run {
-                frame.payload.release()
-                return
-            }
+            val result = fragmentAccum.accumulate(frame, channel.alloc())
+            frame.payload.release()
+            result ?: return
         } else {
-            frame.payload.retain()
+            frame.payload
         }
 
         deliverPayload(ctx, frame, payload)
@@ -203,12 +203,10 @@ class RakNetConnectionImpl(
                 // perspective this is CLIENT_REQUESTED; keep a single code path and let
                 // callers interpret the reason relative to their role if needed.
                 forceDisconnect(DisconnectReason.CLIENT_REQUESTED)
-                ctx.fireUserEventTriggered(RakNetEvent.Disconnected(this, DisconnectReason.CLIENT_REQUESTED))
             }
             ConnectedPacket.DetectLostConnection -> {
                 sendConnectedPacket(ConnectedPacket.DisconnectionNotification, Reliability.UNRELIABLE)
                 forceDisconnect(DisconnectReason.TIMED_OUT)
-                ctx.fireUserEventTriggered(RakNetEvent.Disconnected(this, DisconnectReason.TIMED_OUT))
             }
             is ConnectedPacket.ConnectedPing -> {
                 sendConnectedPacket(
@@ -367,6 +365,7 @@ class RakNetConnectionImpl(
     private fun forceDisconnect(reason: DisconnectReason) {
         if (state == ConnectionState.DISCONNECTED) return
         state = ConnectionState.DISCONNECTED
+        tickerFuture?.cancel(false)
         registry.remove(remoteAddress)
         sendBuffer.release()
         receiveBuffer.release()
