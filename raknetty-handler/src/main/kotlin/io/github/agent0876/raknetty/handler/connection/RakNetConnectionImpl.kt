@@ -197,7 +197,15 @@ class RakNetConnectionImpl(
                     ctx.fireChannelInboundEvent(RakNetEvent.Connected(this))
                 }
             }
-            is ConnectedPacket.NewIncomingConnection -> { /* server-side: connection already CONNECTED */ }
+            is ConnectedPacket.NewIncomingConnection -> {
+                // Server already transitioned to CONNECTED when ConnectionRequest was accepted
+                // (line 183). This is just a client confirmation — nothing to do unless we
+                // somehow missed the state transition.
+                if (state != ConnectionState.CONNECTED) {
+                    state = ConnectionState.CONNECTED
+                    ctx.fireChannelInboundEvent(RakNetEvent.Connected(this))
+                }
+            }
             ConnectedPacket.DisconnectionNotification -> {
                 // The remote peer initiated the disconnect: from a server-side connection's
                 // perspective this is CLIENT_REQUESTED; keep a single code path and let
