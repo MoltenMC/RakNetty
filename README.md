@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4-purple.svg)](https://kotlinlang.org)
 
-**RakNetty** is a Kotlin implementation of the [RakNet](https://github.com/facebookarchive/RakNet) UDP networking protocol built on top of [Netty 4](https://netty.io/).  
+**RakNetty** is a Kotlin implementation of the [RakNet](https://github.com/facebookarchive/RakNet) UDP networking protocol built on top of [Netty 5](https://netty.io/).  
 It provides a Netty-idiomatic API for both server and client roles, with full reliability, ordering, and fragmentation support.
 
 ---
@@ -35,8 +35,8 @@ It provides a Netty-idiomatic API for both server and client roles, with full re
 
 ## Requirements
 
-- JDK 17+
-- Kotlin 1.9+
+- JDK 25+
+- Kotlin 2.4+
 
 ---
 
@@ -80,8 +80,8 @@ import io.github.agent0876.raknetty.core.connection.RakNetConnection
 import io.github.agent0876.raknetty.core.protocol.Reliability
 import io.github.agent0876.raknetty.transport.RakNetServerBootstrap
 import io.github.agent0876.raknetty.transport.SimpleRakNetHandler
-import io.netty.buffer.ByteBuf
-import io.netty.channel.ChannelHandlerContext
+import io.netty5.buffer.Buffer
+import io.netty5.channel.ChannelHandlerContext
 import kotlin.random.Random
 
 fun main() {
@@ -94,12 +94,11 @@ fun main() {
                 println("Connected: ${connection.remoteAddress}")
             }
 
-            override fun onMessage(ctx: ChannelHandlerContext, connection: RakNetConnection, payload: ByteBuf) {
+            override fun onMessage(ctx: ChannelHandlerContext, connection: RakNetConnection, payload: Buffer) {
                 println("Packet from ${connection.remoteAddress}: ${payload.readableBytes()} bytes")
 
                 // Echo back
-                val echo = payload.retainedSlice()
-                connection.send(echo, Reliability.RELIABLE_ORDERED)
+                connection.send(payload.copy(), Reliability.RELIABLE_ORDERED)
             }
 
             override fun onDisconnect(ctx: ChannelHandlerContext, connection: RakNetConnection, reason: DisconnectReason) {
@@ -107,10 +106,11 @@ fun main() {
             }
         })
         .bind(19132)
-        .sync()
+        .asStage().sync()
 
-    println("Server listening on :19132")
-    future.channel().closeFuture().sync()
+    val channel = future.getNow()
+    println("Server listening on :${(channel.localAddress() as java.net.InetSocketAddress).port}")
+    channel.closeFuture().asStage().sync()
 }
 ```
 
@@ -139,7 +139,7 @@ fun main() {
         })
         .connect("127.0.0.1", 19132)
 
-    connectFuture.sync()  // blocks until RakNet handshake completes
+    connectFuture.asStage().sync()  // blocks until RakNet handshake completes
     println("Handshake complete!")
 }
 ```

@@ -77,19 +77,19 @@ interface RakNetConnection {
     val ping: Int            // smoothed RTT in ms
 
     fun send(
-        payload: ByteBuf,
+        payload: Buffer,
         reliability: Reliability,
         orderChannel: Int = 0,
         priority: RakNetPriority = RakNetPriority.NORMAL,
-    ): ChannelFuture
+    ): Future<Void>
 
-    fun disconnect(reason: DisconnectReason = DisconnectReason.CLIENT_REQUESTED): ChannelFuture
+    fun disconnect(reason: DisconnectReason = DisconnectReason.CLIENT_REQUESTED): Future<Void>
 }
 ```
 
 ### Connection States — `ConnectionState`
 
-`CONNECTING` → `CONNECTED` → `DISCONNECTING` → `DISCONNECTED`
+`CONNECTING` → `CONNECTED` → `DISCONNECTED`
 
 ### Disconnect Reasons — `DisconnectReason`
 

@@ -15,6 +15,7 @@ import io.netty5.channel.ChannelHandlerContext
 import io.netty5.channel.SimpleChannelInboundHandler
 import io.netty5.channel.socket.DatagramPacket
 import io.netty5.util.concurrent.Future
+import io.netty5.util.internal.logging.InternalLoggerFactory
 import java.net.InetSocketAddress
 import java.util.concurrent.TimeUnit
 
@@ -24,6 +25,7 @@ class ClientHandshakeHandler(
     private val config: ConnectionConfig = ConnectionConfig(),
 ) : SimpleChannelInboundHandler<AddressedOfflinePacket>() {
 
+    private val log = InternalLoggerFactory.getInstance(ClientHandshakeHandler::class.java)
     private var serverAddress: InetSocketAddress? = null
     private var probeIndex: Int = 0
     private var retryTask: Future<Void>? = null
@@ -43,6 +45,7 @@ class ClientHandshakeHandler(
     fun connect(ctx: ChannelHandlerContext, server: InetSocketAddress, mtu: Int = RakNetProtocol.MTU_SIZES[0]) {
         serverAddress = server
         probeIndex = RakNetProtocol.MTU_SIZES.indexOfFirst { it <= mtu }.coerceAtLeast(0)
+        log.debug("Connecting to {} with initial MTU={} (probeIndex={})", server, RakNetProtocol.MTU_SIZES[probeIndex], probeIndex)
         sendOCReq1(ctx, server)
         scheduleNextProbe(ctx, server)
     }
@@ -78,7 +81,11 @@ class ClientHandshakeHandler(
         reply: OfflinePacket.OpenConnectionReply1,
         sender: InetSocketAddress,
     ) {
-        if (sender != serverAddress) return
+        if (sender != serverAddress) {
+            log.debug("Ignoring OCReply1 from unexpected sender {}", sender)
+            return
+        }
+        log.debug("OCReply1 received (MTU={})", reply.mtu)
         cancelRetry()
 
         val req = OfflinePacket.OpenConnectionRequest2(
@@ -94,7 +101,15 @@ class ClientHandshakeHandler(
         reply: OfflinePacket.OpenConnectionReply2,
         sender: InetSocketAddress,
     ) {
-        if (sender != serverAddress || registry.get(sender) != null) return
+        if (sender != serverAddress) {
+            log.debug("Ignoring OCReply2 from unexpected sender {}", sender)
+            return
+        }
+        if (registry.get(sender) != null) {
+            log.debug("OCReply2 from {} ignored: already registered", sender)
+            return
+        }
+        log.debug("OCReply2 received from {} (MTU={}, serverGUID={})", sender, reply.mtu, reply.serverGuid)
 
         val conn = RakNetConnectionImpl(
             remoteAddress = sender,

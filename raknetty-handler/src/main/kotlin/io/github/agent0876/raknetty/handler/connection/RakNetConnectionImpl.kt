@@ -25,6 +25,7 @@ import io.netty5.channel.ChannelHandlerContext
 import io.netty5.channel.socket.DatagramPacket
 import io.netty5.util.concurrent.Future
 import io.netty5.util.concurrent.Promise
+import io.netty5.util.internal.logging.InternalLoggerFactory
 import java.net.InetSocketAddress
 import java.util.concurrent.TimeUnit
 
@@ -45,6 +46,8 @@ class RakNetConnectionImpl(
 
     @Volatile override var state: ConnectionState = ConnectionState.CONNECTING
     @Volatile override var ping: Int = 0
+
+    private val log = InternalLoggerFactory.getInstance(RakNetConnectionImpl::class.java)
 
     private val sendBuffer       = SendBuffer(mtu, config)
     private val receiveBuffer    = ReceiveBuffer()
@@ -90,6 +93,7 @@ class RakNetConnectionImpl(
 
         // Connection timeout
         if (state.isActive && now - lastRecvTime > config.connectionTimeout) {
+            log.warn("Connection to {} timed out after {} ms", remoteAddress, config.connectionTimeout)
             forceDisconnect(DisconnectReason.TIMED_OUT)
         }
 
@@ -376,6 +380,7 @@ class RakNetConnectionImpl(
 
     private fun forceDisconnect(reason: DisconnectReason) {
         if (state == ConnectionState.DISCONNECTED) return
+        log.info("Disconnecting {}: {}", remoteAddress, reason)
         state = ConnectionState.DISCONNECTED
         tickerFuture?.cancel()
         registry.remove(remoteAddress)

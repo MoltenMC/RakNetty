@@ -36,7 +36,7 @@ Each frame carries:
 - Reliability flags (3 bits)
 - Split-packet metadata (fragment index, split ID, fragment count)
 - Order channel + order index (for ordered/sequenced reliabilities)
-- The actual payload `ByteBuf`
+- The actual payload `Buffer`
 
 ### `OfflinePacketCodec`
 
@@ -65,7 +65,7 @@ Encodes/decodes **post-handshake connected packets**:
 
 ### `BufExtensions` (internal)
 
-Extension functions on `ByteBuf` for reading/writing RakNet-specific types:
+Extension functions on `Buffer` for reading/writing RakNet-specific types:
 - `readUInt24LE()` / `writeUInt24LE()` — 3-byte little-endian sequence numbers
 - `readAddress()` / `writeAddress()` — IPv4/IPv6 socket addresses in RakNet format
 - `readOfflineMessageId()` / `assertOfflineMessageId()` — magic bytes validation

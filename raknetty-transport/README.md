@@ -43,13 +43,13 @@ Fluent builder that configures and binds a UDP RakNet server.
 
 | Method | Default | Description |
 |---|---|---|
-| `group(EventLoopGroup)` | auto-created `NioEventLoopGroup` | Netty event loop to use |
+| `group(EventLoopGroup)` | auto-created `MultithreadEventLoopGroup` | Netty event loop to use |
 | `serverGuid(Long)` | `System.nanoTime()` | Server's unique 64-bit GUID |
 | `serverInfo(() -> String)` | `""` | MOTD / server info string (lazy, called per ping) |
 | `maxConnections(Int)` | `20` | Maximum simultaneous connections |
 | `connectionConfig(ConnectionConfig)` | defaults | Reliability / timing tuning |
 | `handler(ChannelHandler)` | **required** | Your application handler |
-| `bind(port: Int)` | — | Binds and returns `ChannelFuture` |
+| `bind(port: Int)` | — | Binds and returns `Future<Channel>` |
 
 ### Example
 
@@ -76,27 +76,28 @@ val future = RakNetServerBootstrap()
         }
     })
     .bind(19132)
-    .sync()
+    .asStage().sync()
 
-future.channel().closeFuture().sync()
+val channel = future.getNow()
+channel.closeFuture().asStage().sync()
 ```
 
 ---
 
 ## `RakNetClientBootstrap`
 
-Fluent builder that performs the full RakNet handshake and returns a `ChannelFuture` that resolves **after the handshake completes** (not just after the UDP socket opens).
+Fluent builder that performs the full RakNet handshake and returns a `Future<Void>` that resolves **after the handshake completes** (not just after the UDP socket opens).
 
 ### API
 
 | Method | Default | Description |
 |---|---|---|
-| `group(EventLoopGroup)` | auto-created single-thread `NioEventLoopGroup` | Netty event loop to use |
+| `group(EventLoopGroup)` | auto-created single-thread `MultithreadEventLoopGroup` | Netty event loop to use |
 | `clientGuid(Long)` | `System.nanoTime()` | Client's unique 64-bit GUID |
 | `mtu(Int)` | `1492` | Starting MTU size for OCReq1 |
 | `connectionConfig(ConnectionConfig)` | defaults | Reliability / timing tuning |
 | `handler(ChannelHandler)` | **required** | Your application handler |
-| `connect(host, port)` | — | Starts handshake, returns `ChannelFuture` |
+| `connect(host, port)` | — | Starts handshake, returns `Future<Void>` |
 
 ### Example
 
@@ -120,17 +121,17 @@ val future = RakNetClientBootstrap()
     })
     .connect("127.0.0.1", 19132)
 
-future.sync()  // blocks until RakNet handshake is complete (or times out)
+future.asStage().sync()  // blocks until RakNet handshake is complete (or times out)
 ```
 
 ---
 
 ## `SimpleRakNetHandler`
 
-Abstract convenience base class — extend this instead of implementing `ChannelInboundHandlerAdapter` directly.
+Abstract convenience base class — extend this instead of implementing a `ChannelHandler` directly.
 
 ```kotlin
-abstract class SimpleRakNetHandler : ChannelInboundHandlerAdapter() {
+abstract class SimpleRakNetHandler {
 
     /** Called when a RakNet connection is fully established (post-handshake). */
     open fun onConnect(ctx: ChannelHandlerContext, connection: RakNetConnection) {}
@@ -138,9 +139,9 @@ abstract class SimpleRakNetHandler : ChannelInboundHandlerAdapter() {
     /**
      * Called when an application-layer message arrives.
      * [payload] is automatically released after this method returns.
-     * Call [ByteBuf.retain] if you need to hold onto it longer.
+     * Call [Buffer.copy] if you need to hold onto it longer.
      */
-    open fun onMessage(ctx: ChannelHandlerContext, connection: RakNetConnection, payload: ByteBuf) {}
+    open fun onMessage(ctx: ChannelHandlerContext, connection: RakNetConnection, payload: Buffer) {}
 
     /** Called when the connection is closed. */
     open fun onDisconnect(ctx: ChannelHandlerContext, connection: RakNetConnection, reason: DisconnectReason) {}

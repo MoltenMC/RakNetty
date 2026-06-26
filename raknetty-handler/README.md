@@ -23,7 +23,7 @@ dependencies {
 
 ### `DatagramDispatcher`
 
-A `ChannelInboundHandlerAdapter` placed at the front of the Netty pipeline.  
+A `SimpleChannelInboundHandler<DatagramPacket>` placed at the front of the Netty pipeline.  
 Routes each inbound datagram to the correct `RakNetConnectionImpl` based on `remoteAddress`, or passes offline packets downstream for handshake handling.
 
 ### `ConnectionRegistry`
@@ -87,7 +87,7 @@ The core per-connection engine implementing `RakNetConnection`:
 
 ### Events
 
-User-layer handlers receive these via `userEventTriggered`:
+User-layer handlers receive these via `channelInboundEvent`:
 
 ```kotlin
 sealed class RakNetEvent {
@@ -99,7 +99,7 @@ sealed class RakNetEvent {
 Application data arrives as `channelRead` with a `RakNetPacket`:
 
 ```kotlin
-class RakNetPacket(val connection: RakNetConnection, val payload: ByteBuf)
+class RakNetPacket(val connection: RakNetConnection, val payload: Buffer)
 ```
 
 ### `ConnectionConfig`
