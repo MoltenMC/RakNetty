@@ -36,7 +36,6 @@ subprojects {
 
     val javadocJar = tasks.register<Jar>("javadocJar") {
         archiveClassifier.set("javadoc")
-        // Kotlin 프로젝트에서는 빈 javadoc jar 허용
         from(tasks.named("javadoc"))
     }
 
@@ -79,7 +78,9 @@ subprojects {
         repositories {
             maven {
                 name = "CentralPortal"
-                url = uri("https://central.sonatype.com/api/v1/publisher/upload")
+                // ⚠️ 주의: Central Portal 전용 주소로 Maven 배포를 시도할 때 404가 난다면 
+                // 아래 S01 OSSRH 스테이징 주소를 사용해야 일반 maven-publish 플러그인이 정상 작동합니다.
+                url = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
                 credentials {
                     username = System.getenv("SONATYPE_USERNAME")
                     password = System.getenv("SONATYPE_PASSWORD")
@@ -89,11 +90,17 @@ subprojects {
     }
 
     extensions.configure<SigningExtension> {
-        val signingKey = System.getenv("SIGNING_KEY")
-        val signingPassword = System.getenv("SIGNING_PASSWORD")
+        // Gradle 프로퍼티와 시스템 환경 변수를 모두 안전하게 조회하도록 개선
+        val signingKeyId = (project.findProperty("signingKeyId") as? String) ?: System.getenv("ORG_GRADLE_PROJECT_signingKeyId") ?: System.getenv("SIGNING_KEY_ID")
+        val signingKey = (project.findProperty("signingKey") as? String) ?: System.getenv("ORG_GRADLE_PROJECT_signingKey") ?: System.getenv("SIGNING_KEY")
+        val signingPassword = (project.findProperty("signingPassword") as? String) ?: System.getenv("ORG_GRADLE_PROJECT_signingPassword") ?: System.getenv("SIGNING_PASSWORD")
+
         if (!signingKey.isNullOrBlank() && !signingPassword.isNullOrBlank()) {
-            useInMemoryPgpKeys(signingKey, signingPassword)
+            // 인메모리 서명 시 Key ID를 명시적으로 넘겨주어야 무한 행(Hang) 현상을 방지할 수 있습니다.
+            useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
             sign(extensions.getByType<PublishingExtension>().publications["mavenJava"])
+        } else {
+            logger.warn("[$name] Signing credentials not found. Skipping signature.")
         }
     }
 }
