@@ -11,7 +11,7 @@ The **codec layer** of RakNetty. Provides Netty `ChannelHandler` codecs that enc
 ```kotlin
 // Gradle (Kotlin DSL)
 dependencies {
-    implementation("io.github.agent0876.raknetty:raknetty-codec:0.1.0")
+    implementation("io.github.agent0876.raknetty:raknetty-codec:1.0.0")
 }
 ```
 

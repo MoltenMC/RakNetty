@@ -46,7 +46,7 @@ It provides a Netty-idiomatic API for both server and client roles, with full re
 
 ```kotlin
 dependencies {
-    implementation("io.github.agent0876.raknetty:raknetty-transport:0.1.0")
+    implementation("io.github.agent0876.raknetty:raknetty-transport:1.0.0")
 }
 ```
 
@@ -54,7 +54,7 @@ dependencies {
 
 ```groovy
 dependencies {
-    implementation 'io.github.agent0876.raknetty:raknetty-transport:0.1.0'
+    implementation 'io.github.agent0876.raknetty:raknetty-transport:1.0.0'
 }
 ```
 
@@ -64,7 +64,7 @@ dependencies {
 <dependency>
     <groupId>io.github.agent0876.raknetty</groupId>
     <artifactId>raknetty-transport</artifactId>
-    <version>0.1.0</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 
