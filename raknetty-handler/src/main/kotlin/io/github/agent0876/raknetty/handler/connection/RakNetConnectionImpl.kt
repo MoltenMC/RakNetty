@@ -172,10 +172,14 @@ class RakNetConnectionImpl(
         when (packet) {
             is ConnectedPacket.ConnectionRequest -> {
                 if (state == ConnectionState.HANDSHAKING) {
+                    val localAddr = channel.localAddress() as InetSocketAddress
+                    val systemAddresses = List(ConnectedPacket.INTERNAL_ADDRESS_COUNT) { i ->
+                        if (i == 0) remoteAddress else localAddr
+                    }
                     val accepted = ConnectedPacket.ConnectionRequestAccepted(
                         clientAddress     = remoteAddress,
                         clientIndex       = 0,
-                        systemAddresses   = emptyList(),
+                        systemAddresses   = systemAddresses,
                         requestTimestamp  = packet.requestTimestamp,
                         acceptedTimestamp = System.currentTimeMillis(),
                     )
@@ -188,7 +192,7 @@ class RakNetConnectionImpl(
                 if (state == ConnectionState.HANDSHAKING) {
                     val incoming = ConnectedPacket.NewIncomingConnection(
                         serverAddress     = remoteAddress,
-                        internalAddresses = emptyList(),
+                        internalAddresses = packet.systemAddresses.drop(1),
                         requestTimestamp  = packet.requestTimestamp,
                         acceptedTimestamp = packet.acceptedTimestamp,
                     )
