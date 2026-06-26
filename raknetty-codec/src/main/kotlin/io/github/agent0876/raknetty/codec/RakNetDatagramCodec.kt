@@ -4,8 +4,10 @@ import io.github.agent0876.raknetty.core.exception.InvalidPacketException
 import io.github.agent0876.raknetty.core.packet.RakNetDatagram
 import io.github.agent0876.raknetty.core.protocol.PacketId
 import io.github.agent0876.raknetty.core.util.RangeList
-import io.netty.buffer.ByteBuf
-import io.netty.buffer.ByteBufAllocator
+import io.github.agent0876.raknetty.core.util.readUnsignedMediumLE
+import io.github.agent0876.raknetty.core.util.writeMediumLE
+import io.netty5.buffer.Buffer
+import io.netty5.buffer.BufferAllocator
 
 /**
  * Top-level codec for the outer RakNet datagram (the UDP payload).
@@ -29,10 +31,10 @@ object RakNetDatagramCodec {
     // ── Decode ────────────────────────────────────────────────────────────────
 
     /**
-     * Decodes a full datagram payload starting at [buf.readerIndex].
+     * Decodes a full datagram payload starting at [buf.readerOffset].
      * Allocates [RakNetFrame.payload] buffers from [alloc].
      */
-    fun decode(buf: ByteBuf, alloc: ByteBufAllocator): RakNetDatagram {
+    fun decode(buf: Buffer, alloc: BufferAllocator): RakNetDatagram {
         val flags = buf.readUnsignedByte().toInt()
         return when {
             flags and PacketId.FLAG_ACK != 0 -> RakNetDatagram.Ack(RangeList.decode(buf))
@@ -44,17 +46,17 @@ object RakNetDatagramCodec {
         }
     }
 
-    private fun decodeData(flags: Int, buf: ByteBuf, alloc: ByteBufAllocator): RakNetDatagram.Data {
+    private fun decodeData(flags: Int, buf: Buffer, alloc: BufferAllocator): RakNetDatagram.Data {
         val seqNum = buf.readUnsignedMediumLE()
         val frames = buildList {
-            while (buf.isReadable) add(RakNetFrameCodec.decode(buf, alloc))
+            while (buf.readableBytes() > 0) add(RakNetFrameCodec.decode(buf, alloc))
         }
         return RakNetDatagram.Data(flags = flags, sequenceNumber = seqNum, frames = frames)
     }
 
     // ── Encode ────────────────────────────────────────────────────────────────
 
-    fun encode(datagram: RakNetDatagram, out: ByteBuf) {
+    fun encode(datagram: RakNetDatagram, out: Buffer) {
         when (datagram) {
             is RakNetDatagram.Ack  -> encodeAckOrNak(PacketId.FLAG_VALID or PacketId.FLAG_ACK, datagram.ranges, out)
             is RakNetDatagram.Nak  -> encodeAckOrNak(PacketId.FLAG_VALID or PacketId.FLAG_NAK, datagram.ranges, out)
@@ -62,13 +64,13 @@ object RakNetDatagramCodec {
         }
     }
 
-    private fun encodeAckOrNak(flags: Int, ranges: RangeList, out: ByteBuf) {
-        out.writeByte(flags)
+    private fun encodeAckOrNak(flags: Int, ranges: RangeList, out: Buffer) {
+        out.writeByte(flags.toByte())
         ranges.encode(out)
     }
 
-    private fun encodeData(datagram: RakNetDatagram.Data, out: ByteBuf) {
-        out.writeByte(datagram.flags)
+    private fun encodeData(datagram: RakNetDatagram.Data, out: Buffer) {
+        out.writeByte(datagram.flags.toByte())
         out.writeMediumLE(datagram.sequenceNumber)
         for (frame in datagram.frames) RakNetFrameCodec.encode(frame, out)
     }

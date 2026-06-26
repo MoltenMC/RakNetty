@@ -1,7 +1,7 @@
 package io.github.agent0876.raknetty.handler.event
 
 import io.github.agent0876.raknetty.core.connection.RakNetConnection
-import io.netty.buffer.ByteBuf
+import io.netty5.buffer.Buffer
 
 /**
  * Application-layer message fired as [ChannelHandlerContext.fireChannelRead].
@@ -10,5 +10,5 @@ import io.netty.buffer.ByteBuf
  */
 data class RakNetPacket(
     val connection: RakNetConnection,
-    val payload: ByteBuf,
+    val payload: Buffer,
 )

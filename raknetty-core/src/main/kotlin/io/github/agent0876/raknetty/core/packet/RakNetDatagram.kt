@@ -31,7 +31,7 @@ sealed class RakNetDatagram {
         val isContinuousSend: Boolean get() = flags and PacketId.FLAG_CONTINUOUS_SEND != 0
         val needsBAndAs: Boolean      get() = flags and PacketId.FLAG_NEEDS_B_AND_AS  != 0
 
-        fun release() = frames.forEach { it.payload.release() }
+        fun release() = frames.forEach { it.payload.close() }
     }
 
     /** Acknowledges receipt of the datagram sequence numbers in [ranges]. */

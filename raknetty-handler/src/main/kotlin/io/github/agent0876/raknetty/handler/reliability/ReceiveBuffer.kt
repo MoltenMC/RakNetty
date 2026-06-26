@@ -2,7 +2,7 @@ package io.github.agent0876.raknetty.handler.reliability
 
 import io.github.agent0876.raknetty.core.protocol.RakNetProtocol
 import io.github.agent0876.raknetty.core.util.SequenceNumber
-import io.netty.buffer.ByteBuf
+import io.netty5.buffer.Buffer
 import java.util.TreeMap
 
 /**
@@ -62,19 +62,19 @@ class ReceiveBuffer {
 
     // Per-channel expected orderIndex and hold buffer for out-of-order arrivals
     private val orderExpected = IntArray(RakNetProtocol.MAX_ORDER_CHANNELS)
-    private val orderBuffers  = Array(RakNetProtocol.MAX_ORDER_CHANNELS) { TreeMap<Int, ByteBuf>() }
+    private val orderBuffers  = Array(RakNetProtocol.MAX_ORDER_CHANNELS) { TreeMap<Int, Buffer>() }
 
     /** Enqueues [payload] (retained by caller) for ordered delivery on [channel]. */
-    fun enqueueOrdered(channel: Int, orderIndex: Int, payload: ByteBuf) {
+    fun enqueueOrdered(channel: Int, orderIndex: Int, payload: Buffer) {
         orderBuffers[channel][orderIndex] = payload
     }
 
     /**
      * Drains all contiguous in-order payloads from [channel].
-     * Each returned [ByteBuf] is owned by the caller and must be released.
+     * Each returned [Buffer] is owned by the caller and must be released.
      */
-    fun drainOrdered(channel: Int): List<ByteBuf> {
-        val result = mutableListOf<ByteBuf>()
+    fun drainOrdered(channel: Int): List<Buffer> {
+        val result = mutableListOf<Buffer>()
         val buf = orderBuffers[channel]
         while (true) {
             val next = buf.remove(orderExpected[channel]) ?: break
@@ -99,7 +99,7 @@ class ReceiveBuffer {
 
     /** Releases all pending ordered buffers. Call when the connection closes. */
     fun release() {
-        for (buf in orderBuffers) buf.values.forEach { it.release() }
+        for (buf in orderBuffers) buf.values.forEach { it.close() }
         for (buf in orderBuffers) buf.clear()
     }
 

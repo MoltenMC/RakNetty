@@ -19,13 +19,13 @@ import io.github.agent0876.raknetty.handler.event.RakNetPacket
 import io.github.agent0876.raknetty.handler.reliability.FragmentAccumulator
 import io.github.agent0876.raknetty.handler.reliability.ReceiveBuffer
 import io.github.agent0876.raknetty.handler.reliability.SendBuffer
-import io.netty.buffer.ByteBuf
-import io.netty.channel.Channel
-import io.netty.channel.ChannelFuture
-import io.netty.channel.ChannelHandlerContext
-import io.netty.channel.socket.DatagramPacket
+import io.netty5.buffer.Buffer
+import io.netty5.channel.Channel
+import io.netty5.channel.ChannelHandlerContext
+import io.netty5.channel.socket.DatagramPacket
+import io.netty5.util.concurrent.Future
+import io.netty5.util.concurrent.Promise
 import java.net.InetSocketAddress
-import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /**
@@ -53,7 +53,7 @@ class RakNetConnectionImpl(
     private var lastRecvTime     = System.currentTimeMillis()
     private var lastPingSentTime = 0L
     private var nextSplitId      = 0
-    private var tickerFuture: ScheduledFuture<*>? = null
+    private var tickerFuture: Future<Void>? = null
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ class RakNetConnectionImpl(
      * Must be called once after the connection is added to [ConnectionRegistry].
      */
     fun startTicker() {
-        tickerFuture = channel.eventLoop().scheduleAtFixedRate(
+        tickerFuture = channel.executor().scheduleAtFixedRate(
             { if (state != ConnectionState.DISCONNECTED) tick() },
             config.tickIntervalMs,
             config.tickIntervalMs,
@@ -72,7 +72,7 @@ class RakNetConnectionImpl(
 
     private fun tick() {
         val now  = System.currentTimeMillis()
-        val alloc = channel.alloc()
+        val alloc = channel.bufferAllocator()
 
         sendBuffer.flushAcks(alloc)?.let  { channel.write(DatagramPacket(it, remoteAddress)) }
         sendBuffer.flushNaks(alloc)?.let  { channel.write(DatagramPacket(it, remoteAddress)) }
@@ -117,16 +117,16 @@ class RakNetConnectionImpl(
         // Reliable dedup
         if (frame.reliability.isReliable) {
             if (!receiveBuffer.isNewReliable(frame.reliableIndex)) {
-                frame.payload.release()
+                frame.payload.close()
                 return
             }
             receiveBuffer.markReliableReceived(frame.reliableIndex)
         }
 
         // Fragment reassembly
-        val payload: ByteBuf = if (frame.split != null) {
-            val result = fragmentAccum.accumulate(frame, channel.alloc())
-            frame.payload.release()
+        val payload: Buffer = if (frame.split != null) {
+            val result = fragmentAccum.accumulate(frame, channel.bufferAllocator())
+            frame.payload.close()
             result ?: return
         } else {
             frame.payload
@@ -135,7 +135,7 @@ class RakNetConnectionImpl(
         deliverPayload(ctx, frame, payload)
     }
 
-    private fun deliverPayload(ctx: ChannelHandlerContext, frame: RakNetFrame, payload: ByteBuf) {
+    private fun deliverPayload(ctx: ChannelHandlerContext, frame: RakNetFrame, payload: Buffer) {
         when {
             frame.reliability.isOrdered -> {
                 receiveBuffer.enqueueOrdered(frame.orderChannel, frame.orderIndex, payload)
@@ -146,21 +146,21 @@ class RakNetConnectionImpl(
                     receiveBuffer.updateSequenced(frame.orderChannel, frame.sequenceIndex)
                     dispatchPayload(ctx, payload)
                 } else {
-                    payload.release()  // stale sequenced packet — drop
+                    payload.close()  // stale sequenced packet — drop
                 }
             }
             else -> dispatchPayload(ctx, payload)
         }
     }
 
-    private fun dispatchPayload(ctx: ChannelHandlerContext, payload: ByteBuf) {
-        val id = payload.getUnsignedByte(payload.readerIndex()).toInt()
+    private fun dispatchPayload(ctx: ChannelHandlerContext, payload: Buffer) {
+        val id = payload.getUnsignedByte(payload.readerOffset()).toInt()
         if (id < 0x80) {
             // Internal RakNet message (0x00–0x7F)
             try {
                 handleConnectedPacket(ctx, ConnectedPacketCodec.decode(payload))
             } finally {
-                payload.release()
+                payload.close()
             }
         } else {
             // Application-layer message — hand off to the user's handler
@@ -181,7 +181,7 @@ class RakNetConnectionImpl(
                     )
                     sendConnectedPacket(accepted, Reliability.RELIABLE_ORDERED)
                     state = ConnectionState.CONNECTED
-                    ctx.fireUserEventTriggered(RakNetEvent.Connected(this))
+                    ctx.fireChannelInboundEvent(RakNetEvent.Connected(this))
                 }
             }
             is ConnectedPacket.ConnectionRequestAccepted -> {
@@ -194,7 +194,7 @@ class RakNetConnectionImpl(
                     )
                     sendConnectedPacket(incoming, Reliability.RELIABLE_ORDERED)
                     state = ConnectionState.CONNECTED
-                    ctx.fireUserEventTriggered(RakNetEvent.Connected(this))
+                    ctx.fireChannelInboundEvent(RakNetEvent.Connected(this))
                 }
             }
             is ConnectedPacket.NewIncomingConnection -> { /* server-side: connection already CONNECTED */ }
@@ -224,30 +224,30 @@ class RakNetConnectionImpl(
     // ── Outbound ──────────────────────────────────────────────────────────────
 
     override fun send(
-        payload: ByteBuf,
+        payload: Buffer,
         reliability: Reliability,
         orderChannel: Int,
         priority: RakNetPriority,
-    ): ChannelFuture {
+    ): Future<Void> {
         if (!state.isActive) {
-            payload.release()
-            return channel.newFailedFuture(ConnectionClosedException(DisconnectReason.INTERNAL_ERROR))
+            payload.close()
+            return channel.executor().newFailedFuture(ConnectionClosedException(DisconnectReason.INTERNAL_ERROR))
         }
-        val promise = channel.newPromise()
-        if (channel.eventLoop().inEventLoop()) {
+        val promise: Promise<Void> = channel.newPromise()
+        if (channel.executor().inEventLoop()) {
             doSend(payload, reliability, orderChannel, priority)
-            promise.setSuccess()
+            promise.setSuccess(null)
         } else {
-            channel.eventLoop().execute {
+            channel.executor().execute {
                 doSend(payload, reliability, orderChannel, priority)
-                promise.setSuccess()
+                promise.setSuccess(null)
             }
         }
-        return promise
+        return promise as Future<Void>
     }
 
     private fun doSend(
-        payload: ByteBuf,
+        payload: Buffer,
         reliability: Reliability,
         orderChannel: Int,
         priority: RakNetPriority = RakNetPriority.NORMAL,
@@ -266,7 +266,7 @@ class RakNetConnectionImpl(
                     orderChannel  = orderChannel,
                     payload       = payload,
                 )
-                val encoded = sendBuffer.sendImmediate(frame, System.currentTimeMillis(), channel.alloc())
+                val encoded = sendBuffer.sendImmediate(frame, System.currentTimeMillis(), channel.bufferAllocator())
                 channel.writeAndFlush(DatagramPacket(encoded, remoteAddress))
             } else {
                 splitAndSendImmediate(payload, reliability, orderChannel, orderIdx, seqIdx, threshold)
@@ -288,7 +288,7 @@ class RakNetConnectionImpl(
     }
 
     private fun splitAndEnqueue(
-        payload: ByteBuf,
+        payload: Buffer,
         reliability: Reliability,
         orderChannel: Int,
         orderIdx: Int,
@@ -299,11 +299,11 @@ class RakNetConnectionImpl(
         val totalLen   = payload.readableBytes()
         val splitCount = (totalLen + chunkSize - 1) / chunkSize
         var splitIndex = 0
-        var offset     = payload.readerIndex()
+        var offset     = payload.readerOffset()
 
-        while (offset < payload.writerIndex()) {
-            val len   = minOf(chunkSize, payload.writerIndex() - offset)
-            val chunk = payload.retainedSlice(offset, len)
+        while (offset < payload.writerOffset()) {
+            val len   = minOf(chunkSize, payload.writerOffset() - offset)
+            val chunk = payload.copy(offset, len)
             offset += len
             sendBuffer.enqueue(RakNetFrame(
                 reliability   = reliability,
@@ -315,11 +315,11 @@ class RakNetConnectionImpl(
                 payload       = chunk,
             ))
         }
-        payload.release()
+        payload.close()
     }
 
     private fun splitAndSendImmediate(
-        payload: ByteBuf,
+        payload: Buffer,
         reliability: Reliability,
         orderChannel: Int,
         orderIdx: Int,
@@ -330,12 +330,12 @@ class RakNetConnectionImpl(
         val totalLen   = payload.readableBytes()
         val splitCount = (totalLen + chunkSize - 1) / chunkSize
         var splitIndex = 0
-        var offset     = payload.readerIndex()
+        var offset     = payload.readerOffset()
         val now        = System.currentTimeMillis()
 
-        while (offset < payload.writerIndex()) {
-            val len   = minOf(chunkSize, payload.writerIndex() - offset)
-            val chunk = payload.retainedSlice(offset, len)
+        while (offset < payload.writerOffset()) {
+            val len   = minOf(chunkSize, payload.writerOffset() - offset)
+            val chunk = payload.copy(offset, len)
             offset += len
             val frame = RakNetFrame(
                 reliability   = reliability,
@@ -346,31 +346,31 @@ class RakNetConnectionImpl(
                 split         = SplitInfo(splitId, splitCount, splitIndex++),
                 payload       = chunk,
             )
-            val encoded = sendBuffer.sendImmediate(frame, now, channel.alloc())
+            val encoded = sendBuffer.sendImmediate(frame, now, channel.bufferAllocator())
             channel.write(DatagramPacket(encoded, remoteAddress))
         }
-        payload.release()
+        payload.close()
         channel.flush()
     }
 
-    override fun disconnect(reason: DisconnectReason): ChannelFuture {
+    override fun disconnect(reason: DisconnectReason): Future<Void> {
         if (state == ConnectionState.CONNECTED) {
             // IMMEDIATE encodes and flushes directly — no manual flush needed before teardown.
             sendConnectedPacket(ConnectedPacket.DisconnectionNotification, Reliability.UNRELIABLE, RakNetPriority.IMMEDIATE)
         }
         forceDisconnect(reason)
-        return channel.newSucceededFuture()
+        return channel.executor().newSucceededFuture(null)
     }
 
     private fun forceDisconnect(reason: DisconnectReason) {
         if (state == ConnectionState.DISCONNECTED) return
         state = ConnectionState.DISCONNECTED
-        tickerFuture?.cancel(false)
+        tickerFuture?.cancel()
         registry.remove(remoteAddress)
         sendBuffer.release()
         receiveBuffer.release()
         fragmentAccum.release()
-        channel.pipeline().fireUserEventTriggered(RakNetEvent.Disconnected(this, reason))
+        channel.pipeline().fireChannelInboundEvent(RakNetEvent.Disconnected(this, reason))
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -380,7 +380,7 @@ class RakNetConnectionImpl(
         reliability: Reliability,
         priority: RakNetPriority = RakNetPriority.NORMAL,
     ) {
-        val buf = ConnectedPacketCodec.encode(packet, channel.alloc())
+        val buf = ConnectedPacketCodec.encode(packet, channel.bufferAllocator())
         doSend(buf, reliability, 0, priority)
     }
 }

@@ -3,8 +3,11 @@ package io.github.agent0876.raknetty.codec
 import io.github.agent0876.raknetty.core.packet.RakNetFrame
 import io.github.agent0876.raknetty.core.packet.SplitInfo
 import io.github.agent0876.raknetty.core.protocol.Reliability
-import io.netty.buffer.ByteBuf
-import io.netty.buffer.ByteBufAllocator
+import io.github.agent0876.raknetty.core.util.readUnsignedMediumLE
+import io.github.agent0876.raknetty.core.util.writeMediumLE
+import io.netty5.buffer.Buffer
+import io.netty5.buffer.BufferAllocator
+import java.nio.ByteBuffer
 
 /**
  * Encodes and decodes [RakNetFrame]s within a data datagram payload.
@@ -25,7 +28,7 @@ import io.netty.buffer.ByteBufAllocator
  */
 object RakNetFrameCodec {
 
-    fun decode(buf: ByteBuf, alloc: ByteBufAllocator): RakNetFrame {
+    fun decode(buf: Buffer, alloc: BufferAllocator): RakNetFrame {
         val flags       = buf.readUnsignedByte().toInt()
         val reliability = Reliability.fromId(flags ushr 5)
         val hasSplit    = (flags and 0x10) != 0
@@ -47,7 +50,8 @@ object RakNetFrameCodec {
             SplitInfo(splitId = id, splitCount = count, splitIndex = index)
         } else null
 
-        val payload = buf.readRetainedSlice(payloadLen)
+        val payload = buf.copy(buf.readerOffset(), payloadLen)
+        buf.skipReadableBytes(payloadLen)
 
         return RakNetFrame(
             reliability    = reliability,
@@ -60,23 +64,25 @@ object RakNetFrameCodec {
         )
     }
 
-    fun encode(frame: RakNetFrame, out: ByteBuf) {
+    fun encode(frame: RakNetFrame, out: Buffer) {
         val flags = (frame.reliability.id shl 5) or (if (frame.split != null) 0x10 else 0)
-        out.writeByte(flags)
-        out.writeShort(frame.payload.readableBytes() * 8)   // length in bits
+        out.writeByte(flags.toByte())
+        out.writeShort((frame.payload.readableBytes() * 8).toShort())   // length in bits
 
         if (frame.reliability.isReliable)  out.writeMediumLE(frame.reliableIndex)
         if (frame.reliability.isSequenced) out.writeMediumLE(frame.sequenceIndex)
         if (frame.reliability.isOrdered || frame.reliability.isSequenced) {
             out.writeMediumLE(frame.orderIndex)
-            out.writeByte(frame.orderChannel)
+            out.writeByte(frame.orderChannel.toByte())
         }
         frame.split?.let {
             out.writeInt(it.splitCount)
-            out.writeShort(it.splitId)
+            out.writeShort(it.splitId.toShort())
             out.writeInt(it.splitIndex)
         }
-        // write without advancing the source readerIndex
-        out.writeBytes(frame.payload, frame.payload.readerIndex(), frame.payload.readableBytes())
+        val len = frame.payload.readableBytes()
+        val temp = ByteArray(len)
+        frame.payload.copyInto(frame.payload.readerOffset(), temp, 0, len)
+        out.writeBytes(ByteBuffer.wrap(temp, 0, len))
     }
 }

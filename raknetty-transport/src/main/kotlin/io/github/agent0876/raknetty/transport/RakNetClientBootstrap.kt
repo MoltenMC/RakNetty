@@ -6,38 +6,22 @@ import io.github.agent0876.raknetty.handler.connection.ConnectionConfig
 import io.github.agent0876.raknetty.handler.event.RakNetEvent
 import io.github.agent0876.raknetty.handler.handshake.ClientHandshakeHandler
 import io.github.agent0876.raknetty.core.protocol.RakNetProtocol
-import io.netty.bootstrap.Bootstrap
-import io.netty.channel.ChannelFuture
-import io.netty.channel.ChannelHandler
-import io.netty.channel.ChannelHandlerContext
-import io.netty.channel.ChannelInboundHandlerAdapter
-import io.netty.channel.ChannelInitializer
-import io.netty.channel.EventLoopGroup
-import io.netty.channel.MultiThreadIoEventLoopGroup
-import io.netty.channel.nio.NioIoHandler
-import io.netty.channel.socket.nio.NioDatagramChannel
+import io.netty5.bootstrap.Bootstrap
+import io.netty5.channel.Channel
+import io.netty5.channel.ChannelHandler
+import io.netty5.channel.ChannelHandlerAdapter
+import io.netty5.channel.ChannelHandlerContext
+import io.netty5.channel.ChannelInitializer
+import io.netty5.channel.EventLoopGroup
+import io.netty5.channel.MultithreadEventLoopGroup
+import io.netty5.channel.nio.NioHandler
+import io.netty5.channel.socket.nio.NioDatagramChannel
+import io.netty5.util.concurrent.Future
+import io.netty5.util.concurrent.Promise
 import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.util.concurrent.TimeUnit
 
-/**
- * Fluent builder for a RakNet client connection.
- *
- * Usage:
- * ```kotlin
- * val future = RakNetClientBootstrap()
- *     .group(NioEventLoopGroup(1))
- *     .clientGuid(Random.nextLong())
- *     .handler(MyClientHandler())
- *     .connect("play.example.com", 19132)
- *
- * future.sync()  // waits until ConnectionRequestAccepted is received
- * ```
- *
- * The returned [ChannelFuture] is a promise that completes **after the full
- * RakNet handshake** (OCReq1/2 + ConnectionRequest/Accepted), not just after
- * the UDP socket is bound.
- */
 class RakNetClientBootstrap {
 
     private var group: EventLoopGroup?        = null
@@ -51,25 +35,19 @@ class RakNetClientBootstrap {
     fun connectionConfig(config: ConnectionConfig)  = apply { this.config = config }
     fun mtu(mtu: Int)                              = apply { this.mtu = mtu }
 
-    /**
-     * Application-layer handler. Receives [io.github.agent0876.raknetty.handler.event.RakNetPacket]
-     * channel-reads and [io.github.agent0876.raknetty.handler.event.RakNetEvent] user events.
-     * Extend [SimpleRakNetHandler] for convenience.
-     */
     fun handler(handler: ChannelHandler) = apply { this.handler = handler }
 
-    fun connect(host: String, port: Int): ChannelFuture = connect(InetSocketAddress(host, port))
+    fun connect(host: String, port: Int): Future<Void> = connect(InetSocketAddress(host, port))
 
-    fun connect(address: InetSocketAddress): ChannelFuture {
+    fun connect(address: InetSocketAddress): Future<Void> {
         val registry         = ConnectionRegistry()
         val dispatcher       = DatagramDispatcher(registry)
         val handshakeHandler = ClientHandshakeHandler(registry, clientGuid, config)
         val userHandler      = requireNotNull(handler) { "handler() must be set before connect()" }
 
         val ownedGroup   = group == null
-        val resolvedGroup = group ?: MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory())
+        val resolvedGroup = group ?: MultithreadEventLoopGroup(1, NioHandler.newFactory())
 
-        // Bind a local UDP socket (port 0 = OS-assigned ephemeral port)
         val channel = Bootstrap()
             .group(resolvedGroup)
             .channel(NioDatagramChannel::class.java)
@@ -81,30 +59,25 @@ class RakNetClientBootstrap {
                         .addLast("user",        userHandler)
                 }
             })
-            .bind(0).sync().channel()
+            .bind(0).asStage().sync().getNow()
 
-        val connectPromise = channel.newPromise()
+        val connectPromise: Promise<Void> = channel.newPromise()
 
-        // Intercept the first Connected event to resolve connectPromise, then remove itself.
         channel.pipeline().addBefore("user", "connect-resolver",
-            object : ChannelInboundHandlerAdapter() {
-                override fun userEventTriggered(ctx: ChannelHandlerContext, evt: Any) {
+            object : ChannelHandlerAdapter() {
+                override fun channelInboundEvent(ctx: ChannelHandlerContext, evt: Any) {
                     if (evt is RakNetEvent.Connected && !connectPromise.isDone) {
-                        // Propagate first while the context is still in the pipeline, then
-                        // mark success and remove. Removing before firing can leave ctx.next
-                        // invalid in Netty 4.2, making the subsequent fire a silent no-op.
-                        ctx.fireUserEventTriggered(evt)
-                        connectPromise.setSuccess()
+                        ctx.fireChannelInboundEvent(evt)
+                        connectPromise.setSuccess(null)
                         ctx.pipeline().remove(this)
                         return
                     }
-                    ctx.fireUserEventTriggered(evt)
+                    ctx.fireChannelInboundEvent(evt)
                 }
             }
         )
 
-        // Fail the promise if the handshake does not complete within connectionTimeout
-        channel.eventLoop().schedule({
+        channel.executor().schedule({
             if (!connectPromise.isDone) {
                 connectPromise.setFailure(ConnectException("RakNet handshake timed out after ${config.connectionTimeout} ms"))
                 channel.close()
@@ -112,8 +85,7 @@ class RakNetClientBootstrap {
             }
         }, config.connectionTimeout, TimeUnit.MILLISECONDS)
 
-        // Kick off the handshake from inside the EventLoop so ctx is valid
-        channel.eventLoop().execute {
+        channel.executor().execute {
             handshakeHandler.connect(
                 channel.pipeline().context(handshakeHandler),
                 address,
@@ -121,6 +93,6 @@ class RakNetClientBootstrap {
             )
         }
 
-        return connectPromise
+        return connectPromise as Future<Void>
     }
 }

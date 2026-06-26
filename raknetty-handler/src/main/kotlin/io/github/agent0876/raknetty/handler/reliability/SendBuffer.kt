@@ -8,8 +8,8 @@ import io.github.agent0876.raknetty.core.protocol.RakNetProtocol
 import io.github.agent0876.raknetty.core.util.RangeList
 import io.github.agent0876.raknetty.core.util.SequenceNumber
 import io.github.agent0876.raknetty.handler.connection.ConnectionConfig
-import io.netty.buffer.ByteBuf
-import io.netty.buffer.ByteBufAllocator
+import io.netty5.buffer.Buffer
+import io.netty5.buffer.BufferAllocator
 import java.util.TreeMap
 import kotlin.math.abs
 
@@ -128,7 +128,7 @@ class SendBuffer(private val mtu: Int, private val config: ConnectionConfig) {
                 cwnd += 1.0 / cwnd        // congestion avoidance
             }
             cwnd = cwnd.coerceAtMost(config.maxUnackedDatagrams.toDouble())
-            pending.reliableFrames.forEach { it.payload.release() }
+            pending.reliableFrames.forEach { it.payload.close() }
         }
         // ACKs advancing the window mean we're in a new congestion epoch.
         congestionReacted = false
@@ -148,36 +148,36 @@ class SendBuffer(private val mtu: Int, private val config: ConnectionConfig) {
      * Reliable frames are added to the unacked window for retransmission;
      * unreliable frames have their payload released right away.
      *
-     * Callers are responsible for writing and flushing the returned [ByteBuf].
+     * Callers are responsible for writing and flushing the returned [Buffer].
      */
-    fun sendImmediate(frame: RakNetFrame, now: Long, alloc: ByteBufAllocator): ByteBuf {
+    fun sendImmediate(frame: RakNetFrame, now: Long, alloc: BufferAllocator): Buffer {
         val seqNum  = advanceDatagramSeq()
         val encoded = encodeDatagram(seqNum, listOf(frame), alloc)
         if (frame.reliability.isReliable) {
             unacked[seqNum] = PendingDatagram(seqNum, listOf(frame), now)
         } else {
-            frame.payload.release()
+            frame.payload.close()
         }
         return encoded
     }
 
     // ── Tick output (call once per tick) ─────────────────────────────────────
 
-    fun flushAcks(alloc: ByteBufAllocator): ByteBuf? {
+    fun flushAcks(alloc: BufferAllocator): Buffer? {
         if (pendingAcks.isEmpty()) return null
-        return alloc.buffer().also { RakNetDatagramCodec.encode(RakNetDatagram.Ack(pendingAcks), it) }
+        return alloc.allocate(256).also { RakNetDatagramCodec.encode(RakNetDatagram.Ack(pendingAcks), it) }
             .also { pendingAcks.clear() }
     }
 
-    fun flushNaks(alloc: ByteBufAllocator): ByteBuf? {
+    fun flushNaks(alloc: BufferAllocator): Buffer? {
         if (pendingNaks.isEmpty()) return null
-        return alloc.buffer().also { RakNetDatagramCodec.encode(RakNetDatagram.Nak(pendingNaks), it) }
+        return alloc.allocate(256).also { RakNetDatagramCodec.encode(RakNetDatagram.Nak(pendingNaks), it) }
             .also { pendingNaks.clear() }
     }
 
     /** Returns encoded datagrams for frames that timed out or were NAK'd. */
-    fun retransmitTimedOut(now: Long, alloc: ByteBufAllocator): List<ByteBuf> {
-        val result = mutableListOf<ByteBuf>()
+    fun retransmitTimedOut(now: Long, alloc: BufferAllocator): List<Buffer> {
+        val result = mutableListOf<Buffer>()
 
         fun retransmit(pending: PendingDatagram) {
             val newSeq = advanceDatagramSeq()
@@ -204,15 +204,15 @@ class SendBuffer(private val mtu: Int, private val config: ConnectionConfig) {
     }
 
     /**
-     * Packs queued frames into datagrams and returns encoded [ByteBuf]s to send.
+     * Packs queued frames into datagrams and returns encoded [Buffer]s to send.
      * Send rate is governed by [cwnd]; [config.maxUnackedDatagrams] is the hard cap.
      */
-    fun flushSendQueue(now: Long, alloc: ByteBufAllocator): List<ByteBuf> {
+    fun flushSendQueue(now: Long, alloc: BufferAllocator): List<Buffer> {
         val window = cwnd.toInt().coerceAtLeast(1)
         if (sendQueue.isEmpty() || unacked.size >= window) return emptyList()
 
         val maxPayload = mtu - 28   // subtract IP(20) + UDP(8)
-        val result = mutableListOf<ByteBuf>()
+        val result = mutableListOf<Buffer>()
 
         while (sendQueue.isNotEmpty() && unacked.size < window) {
             val frames = mutableListOf<RakNetFrame>()
@@ -230,7 +230,7 @@ class SendBuffer(private val mtu: Int, private val config: ConnectionConfig) {
             result += encodeDatagram(seqNum, frames, alloc)
 
             val reliableFrames = frames.filter { it.reliability.isReliable }
-            frames.filter { !it.reliability.isReliable }.forEach { it.payload.release() }
+            frames.filter { !it.reliability.isReliable }.forEach { it.payload.close() }
             if (reliableFrames.isNotEmpty()) {
                 unacked[seqNum] = PendingDatagram(seqNum, reliableFrames, now)
             }
@@ -244,16 +244,16 @@ class SendBuffer(private val mtu: Int, private val config: ConnectionConfig) {
     private fun advanceDatagramSeq(): Int =
         nextDatagramSeq.also { nextDatagramSeq = SequenceNumber.increment(it) }
 
-    private fun encodeDatagram(seqNum: Int, frames: List<RakNetFrame>, alloc: ByteBufAllocator): ByteBuf {
+    private fun encodeDatagram(seqNum: Int, frames: List<RakNetFrame>, alloc: BufferAllocator): Buffer {
         val datagram = RakNetDatagram.Data(PacketId.FLAG_VALID, seqNum, frames)
-        return alloc.buffer().also { RakNetDatagramCodec.encode(datagram, it) }
+        return alloc.allocate(256).also { RakNetDatagramCodec.encode(datagram, it) }
     }
 
     /** Releases all retained payloads. Call when the connection closes. */
     fun release() {
-        sendQueue.forEach { it.payload.release() }
+        sendQueue.forEach { it.payload.close() }
         sendQueue.clear()
-        unacked.values.forEach { p -> p.reliableFrames.forEach { it.payload.release() } }
+        unacked.values.forEach { p -> p.reliableFrames.forEach { it.payload.close() } }
         unacked.clear()
     }
 }

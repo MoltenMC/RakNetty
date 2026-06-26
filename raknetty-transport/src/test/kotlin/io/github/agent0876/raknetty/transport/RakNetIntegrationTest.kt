@@ -3,11 +3,12 @@ package io.github.agent0876.raknetty.transport
 import io.github.agent0876.raknetty.core.connection.DisconnectReason
 import io.github.agent0876.raknetty.core.connection.RakNetConnection
 import io.github.agent0876.raknetty.core.protocol.Reliability
-import io.netty.buffer.Unpooled
-import io.netty.channel.ChannelHandlerContext
-import io.netty.channel.EventLoopGroup
-import io.netty.channel.MultiThreadIoEventLoopGroup
-import io.netty.channel.nio.NioIoHandler
+import io.netty5.buffer.BufferAllocator
+import java.nio.ByteBuffer
+import io.netty5.channel.ChannelHandlerContext
+import io.netty5.channel.EventLoopGroup
+import io.netty5.channel.MultithreadEventLoopGroup
+import io.netty5.channel.nio.NioHandler
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import java.net.InetSocketAddress
@@ -23,8 +24,8 @@ class RakNetIntegrationTest {
 
     private lateinit var group: EventLoopGroup
 
-    @BeforeEach fun setUp()    { group = MultiThreadIoEventLoopGroup(2, NioIoHandler.newFactory()) }
-    @AfterEach  fun tearDown() { group.shutdownGracefully().sync() }
+    @BeforeEach fun setUp()    { group = MultithreadEventLoopGroup(2, NioHandler.newFactory()) }
+    @AfterEach  fun tearDown() { group.shutdownGracefully().asStage().sync() }
 
     @Test fun `server and client complete handshake`() {
         val serverConnected = CountDownLatch(1)
@@ -44,9 +45,10 @@ class RakNetIntegrationTest {
                 }
             })
             .bind(0)
-            .sync()
+            .asStage().sync()
 
-        val serverPort = (serverFuture.channel().localAddress() as InetSocketAddress).port
+        val serverChannel = serverFuture.getNow()
+        val serverPort = (serverChannel.localAddress() as InetSocketAddress).port
 
         // ── Client ────────────────────────────────────────────────────────────
         val connectFuture = RakNetClientBootstrap()
@@ -60,7 +62,7 @@ class RakNetIntegrationTest {
             })
             .connect("127.0.0.1", serverPort)
 
-        assertTrue(connectFuture.await(5, TimeUnit.SECONDS),  "Client connect timed out")
+        assertTrue(connectFuture.asStage().await(5, TimeUnit.SECONDS),  "Client connect timed out")
         assertTrue(serverConnected.await(2, TimeUnit.SECONDS), "Server did not see connection")
         assertTrue(clientConnected.await(2, TimeUnit.SECONDS), "Client did not see connection")
 
@@ -68,7 +70,7 @@ class RakNetIntegrationTest {
         assertNotNull(clientConn.get())
         assertEquals(serverConn.get()!!.mtu, clientConn.get()!!.mtu)
 
-        serverFuture.channel().close().sync()
+        serverChannel.close().asStage().sync()
     }
 
     @Test fun `client can send message to server after handshake`() {
@@ -82,40 +84,40 @@ class RakNetIntegrationTest {
                 override fun onMessage(
                     ctx: ChannelHandlerContext,
                     connection: RakNetConnection,
-                    payload: io.netty.buffer.ByteBuf,
+                    payload: io.netty5.buffer.Buffer,
                 ) {
                     val bytes = ByteArray(payload.readableBytes())
-                    payload.readBytes(bytes)
+                    payload.readBytes(ByteBuffer.wrap(bytes))
                     receivedBytes.set(bytes)
                     messageReceived.countDown()
                 }
             })
-            .bind(0).sync()
+            .bind(0).asStage().sync()
 
-        val serverPort = (serverFuture.channel().localAddress() as InetSocketAddress).port
+        val serverChannel2 = serverFuture.getNow()
+        val serverPort = (serverChannel2.localAddress() as InetSocketAddress).port
 
         val connectFuture = RakNetClientBootstrap()
             .group(group)
             .clientGuid(20L)
             .handler(object : SimpleRakNetHandler() {
                 override fun onConnect(ctx: ChannelHandlerContext, connection: RakNetConnection) {
-                    // 0x80 prefix = application-layer data marker
-                    val payload = Unpooled.buffer(5)
-                        .writeByte(0x80)
-                        .writeInt(0xCAFEBABE.toInt())
+                    val payload = BufferAllocator.onHeapUnpooled().allocate(5)
+                    payload.writeByte(0x80.toByte())
+                    payload.writeInt(0xCAFEBABE.toInt())
                     connection.send(payload, Reliability.RELIABLE_ORDERED)
                 }
             })
             .connect("127.0.0.1", serverPort)
 
-        assertTrue(connectFuture.await(5, TimeUnit.SECONDS),     "Connect timed out")
+        assertTrue(connectFuture.asStage().await(5, TimeUnit.SECONDS),     "Connect timed out")
         assertTrue(messageReceived.await(3, TimeUnit.SECONDS),    "Message not received")
 
         assertNotNull(receivedBytes.get())
         assertEquals(5, receivedBytes.get()!!.size)
         assertEquals(0x80.toByte(), receivedBytes.get()!![0])
 
-        serverFuture.channel().close().sync()
+        serverChannel2.close().asStage().sync()
     }
 
     @Test fun `client disconnect fires server Disconnected event`() {
@@ -135,9 +137,10 @@ class RakNetIntegrationTest {
                     serverDisconnected.countDown()
                 }
             })
-            .bind(0).sync()
+            .bind(0).asStage().sync()
 
-        val serverPort = (serverFuture.channel().localAddress() as InetSocketAddress).port
+        val serverChannel3 = serverFuture.getNow()
+        val serverPort = (serverChannel3.localAddress() as InetSocketAddress).port
 
         val connectFuture = RakNetClientBootstrap()
             .group(group)
@@ -149,10 +152,10 @@ class RakNetIntegrationTest {
             })
             .connect("127.0.0.1", serverPort)
 
-        assertTrue(connectFuture.await(5, TimeUnit.SECONDS), "Connect timed out")
+        assertTrue(connectFuture.asStage().await(5, TimeUnit.SECONDS), "Connect timed out")
         assertTrue(serverDisconnected.await(3, TimeUnit.SECONDS), "Server did not see disconnect")
         assertEquals(DisconnectReason.CLIENT_REQUESTED, disconnectReason.get())
 
-        serverFuture.channel().close().sync()
+        serverChannel3.close().asStage().sync()
     }
 }

@@ -3,7 +3,7 @@ package io.github.agent0876.raknetty.codec
 import io.github.agent0876.raknetty.codec.offline.OfflinePacket
 import io.github.agent0876.raknetty.codec.offline.OfflinePacketCodec
 import io.github.agent0876.raknetty.core.protocol.RakNetProtocol
-import io.netty.buffer.Unpooled
+import io.netty5.buffer.BufferAllocator
 import java.net.InetSocketAddress
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -11,12 +11,12 @@ import kotlin.test.assertNull
 
 class OfflinePacketCodecTest {
 
-    private val alloc = Unpooled.EMPTY_BUFFER.alloc()
+    private val alloc = BufferAllocator.onHeapUnpooled()
 
     private inline fun <reified T : OfflinePacket> roundtrip(packet: OfflinePacket): T {
         val encoded = OfflinePacketCodec.encode(packet, alloc)
         val decoded = OfflinePacketCodec.decode(encoded)
-        encoded.release()
+        encoded.close()
         return decoded as T
     }
 
@@ -37,7 +37,7 @@ class OfflinePacketCodecTest {
         val original = OfflinePacket.OpenConnectionRequest1(RakNetProtocol.VERSION, mtu)
         val encoded  = OfflinePacketCodec.encode(original, alloc)
         val decoded  = OfflinePacketCodec.decode(encoded) as OfflinePacket.OpenConnectionRequest1
-        encoded.release()
+        encoded.close()
 
         assertEquals(RakNetProtocol.VERSION, decoded.protocolVersion)
         assertEquals(mtu, decoded.mtu)
@@ -69,13 +69,13 @@ class OfflinePacketCodecTest {
 
     @Test fun `invalid magic returns null`() {
         // craft a ping with corrupted magic
-        val buf = alloc.buffer()
+        val buf = alloc.allocate(64)
         buf.writeByte(0x01) // UNCONNECTED_PING id
         buf.writeLong(0)    // timestamp
-        buf.writeZero(16)   // wrong magic (all zeros)
+        repeat(16) { buf.writeByte(0.toByte()) }   // wrong magic (all zeros)
         buf.writeLong(0)    // guid
         val result = OfflinePacketCodec.decode(buf)
-        buf.release()
+        buf.close()
         assertNull(result)
     }
 }

@@ -2,38 +2,27 @@ package io.github.agent0876.raknetty.codec.ext
 
 import io.github.agent0876.raknetty.core.exception.InvalidPacketException
 import io.github.agent0876.raknetty.core.protocol.PacketId
-import io.netty.buffer.ByteBuf
+import io.netty5.buffer.Buffer
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetSocketAddress
+import java.nio.ByteBuffer
 
-// ── Magic ────────────────────────────────────────────────────────────────────
-
-fun ByteBuf.writeMagic() {
-    writeBytes(PacketId.OFFLINE_MESSAGE_ID)
+fun Buffer.writeMagic() {
+    writeBytes(ByteBuffer.wrap(PacketId.OFFLINE_MESSAGE_ID))
 }
 
-/**
- * Reads 16 bytes and returns `true` if they match [PacketId.OFFLINE_MESSAGE_ID].
- * Returns `false` for non-RakNet traffic so callers can drop the packet silently.
- */
-fun ByteBuf.readMagic(): Boolean {
+fun Buffer.readMagic(): Boolean {
     val bytes = ByteArray(16)
-    readBytes(bytes)
+    readBytes(ByteBuffer.wrap(bytes))
     return bytes.contentEquals(PacketId.OFFLINE_MESSAGE_ID)
 }
 
-fun ByteBuf.verifyMagic() {
+fun Buffer.verifyMagic() {
     if (!readMagic()) throw InvalidPacketException("Offline message magic mismatch")
 }
 
-// ── SystemAddress ─────────────────────────────────────────────────────────────
-
-/**
- * Reads a RakNet SystemAddress (1-byte family + address bytes + port).
- * IPv4 address bytes are XOR'd with 0xFF on the wire.
- */
-fun ByteBuf.readAddress(): InetSocketAddress {
+fun Buffer.readAddress(): InetSocketAddress {
     return when (val family = readUnsignedByte().toInt()) {
         4 -> {
             val raw = ByteArray(4) { (readByte().toInt() xor 0xFF).toByte() }
@@ -41,40 +30,41 @@ fun ByteBuf.readAddress(): InetSocketAddress {
             InetSocketAddress(Inet4Address.getByAddress(raw), port)
         }
         6 -> {
-            skipBytes(2)  // AF_INET6 (platform-dependent, skip)
+            skipReadableBytes(2)
             val port = readUnsignedShort()
-            skipBytes(4)  // flow info
-            val raw = ByteArray(16).also { readBytes(it) }
-            skipBytes(4)  // scope id
+            skipReadableBytes(4)
+            val raw = ByteArray(16)
+            readBytes(ByteBuffer.wrap(raw))
+            skipReadableBytes(4)
             InetSocketAddress(Inet6Address.getByAddress(null, raw, 0), port)
         }
         else -> throw InvalidPacketException("Unknown address family: $family")
     }
 }
 
-fun ByteBuf.writeAddress(address: InetSocketAddress) {
+fun Buffer.writeAddress(address: InetSocketAddress) {
     when (val addr = address.address) {
         is Inet4Address -> {
-            writeByte(4)
-            for (b in addr.address) writeByte(b.toInt() xor 0xFF)
-            writeShort(address.port)
+            writeByte(4.toByte())
+            for (b in addr.address) writeByte((b.toInt() xor 0xFF).toByte())
+            writeShort(address.port.toShort())
         }
         is Inet6Address -> {
-            writeByte(6)
-            writeShortLE(23)   // AF_INET6 = 23 on Windows (common RakNet target)
-            writeShort(address.port)
-            writeInt(0)        // flow info
-            writeBytes(addr.address)
-            writeInt(0)        // scope id
+            writeByte(6.toByte())
+            // write AF_INET6 = 23 in little-endian (2 bytes)
+            writeByte(23.toByte())
+            writeByte(0.toByte())
+            writeShort(address.port.toShort())
+            writeInt(0)
+            writeBytes(ByteBuffer.wrap(addr.address))
+            writeInt(0)
         }
         else -> throw InvalidPacketException("Unsupported address type: ${addr::class.simpleName}")
     }
 }
 
-/** Size in bytes of a serialized IPv4 SystemAddress. */
-const val IPV4_ADDRESS_SIZE = 7   // 1 + 4 + 2
+const val IPV4_ADDRESS_SIZE = 7
 
-/** Size in bytes of a serialized IPv6 SystemAddress. */
-const val IPV6_ADDRESS_SIZE = 29  // 1 + 2 + 2 + 4 + 16 + 4
+const val IPV6_ADDRESS_SIZE = 29
 
 val UNASSIGNED_ADDRESS: InetSocketAddress = InetSocketAddress("0.0.0.0", 0)

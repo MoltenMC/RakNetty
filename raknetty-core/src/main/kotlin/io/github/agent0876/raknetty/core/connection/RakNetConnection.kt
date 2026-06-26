@@ -2,9 +2,9 @@ package io.github.agent0876.raknetty.core.connection
 
 import io.github.agent0876.raknetty.core.protocol.RakNetPriority
 import io.github.agent0876.raknetty.core.protocol.Reliability
-import io.netty.buffer.ByteBuf
-import io.netty.channel.Channel
-import io.netty.channel.ChannelFuture
+import io.netty5.buffer.Buffer
+import io.netty5.channel.Channel
+import io.netty5.util.concurrent.Future
 import java.net.InetSocketAddress
 
 /**
@@ -49,15 +49,15 @@ interface RakNetConnection {
      *         NOT when the remote end has acknowledged it.
      */
     fun send(
-        payload: ByteBuf,
+        payload: Buffer,
         reliability: Reliability,
         orderChannel: Int = 0,
         priority: RakNetPriority = RakNetPriority.NORMAL,
-    ): ChannelFuture
+    ): Future<Void>
 
     /**
      * Initiates a clean disconnect by sending a DISCONNECTION_NOTIFICATION,
      * then closes the connection after the send completes.
      */
-    fun disconnect(reason: DisconnectReason = DisconnectReason.CLIENT_REQUESTED): ChannelFuture
+    fun disconnect(reason: DisconnectReason = DisconnectReason.CLIENT_REQUESTED): Future<Void>
 }

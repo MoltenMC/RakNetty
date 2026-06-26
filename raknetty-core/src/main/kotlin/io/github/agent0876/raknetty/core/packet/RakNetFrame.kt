@@ -1,7 +1,7 @@
 package io.github.agent0876.raknetty.core.packet
 
 import io.github.agent0876.raknetty.core.protocol.Reliability
-import io.netty.buffer.ByteBuf
+import io.netty5.buffer.Buffer
 
 /**
  * A single encapsulated packet frame carried inside a [RakNetDatagram.Data].
@@ -11,7 +11,7 @@ import io.netty.buffer.ByteBuf
  * leave them at their default of 0.
  *
  * **Lifecycle**: the holder of this frame owns [payload] and must call
- * [payload].release() when done.
+ * [payload].close() when done.
  */
 data class RakNetFrame(
     val reliability: Reliability,
@@ -20,7 +20,7 @@ data class RakNetFrame(
     val orderIndex: Int     = 0,  // 24-bit; present if isOrdered || isSequenced
     val orderChannel: Int   = 0,  // 0..31;  present if isOrdered || isSequenced
     val split: SplitInfo?   = null,
-    val payload: ByteBuf,
+    val payload: Buffer,
 ) {
     /**
      * Exact wire size of this frame in bytes.

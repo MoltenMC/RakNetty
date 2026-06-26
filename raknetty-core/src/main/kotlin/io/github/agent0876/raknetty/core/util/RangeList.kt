@@ -1,6 +1,6 @@
 package io.github.agent0876.raknetty.core.util
 
-import io.netty.buffer.ByteBuf
+import io.netty5.buffer.Buffer
 
 /**
  * A sorted, merged list of inclusive integer ranges.
@@ -61,8 +61,8 @@ class RangeList {
 
     // ── Wire encoding (RakNet ACK/NAK datagram body) ─────────────────────────
 
-    fun encode(buf: ByteBuf) {
-        buf.writeShort(_ranges.size)
+    fun encode(buf: Buffer) {
+        buf.writeShort(_ranges.size.toShort())
         for (r in _ranges) {
             val single = r.first == r.last
             buf.writeBoolean(single)
@@ -72,7 +72,7 @@ class RangeList {
     }
 
     companion object {
-        fun decode(buf: ByteBuf): RangeList {
+        fun decode(buf: Buffer): RangeList {
             val list = RangeList()
             val count = buf.readUnsignedShort()
             repeat(count) {

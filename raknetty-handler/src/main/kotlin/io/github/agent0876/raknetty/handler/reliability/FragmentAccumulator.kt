@@ -2,8 +2,8 @@ package io.github.agent0876.raknetty.handler.reliability
 
 import io.github.agent0876.raknetty.core.packet.RakNetFrame
 import io.github.agent0876.raknetty.core.protocol.RakNetProtocol
-import io.netty.buffer.ByteBuf
-import io.netty.buffer.ByteBufAllocator
+import io.netty5.buffer.Buffer
+import io.netty5.buffer.BufferAllocator
 
 /**
  * Reassembles split (fragmented) RakNet messages.
@@ -21,7 +21,7 @@ class FragmentAccumulator {
         val splitId: Int,
         val splitCount: Int,
         val createdAt: Long,
-        val fragments: Array<ByteBuf?> = arrayOfNulls(splitCount),
+        val fragments: Array<Buffer?> = arrayOfNulls(splitCount),
         var received: Int = 0,
     )
 
@@ -31,13 +31,13 @@ class FragmentAccumulator {
      * Adds [frame]'s fragment to the accumulator.
      *
      * Returns the fully reassembled payload when the last fragment arrives,
-     * or `null` when more fragments are still expected. The returned [ByteBuf] is
+     * or `null` when more fragments are still expected. The returned [Buffer] is
      * a composite owned by the caller — caller must release it.
      *
      * [frame.payload] is retained internally; callers must still release [frame.payload]
      * themselves after this call returns.
      */
-    fun accumulate(frame: RakNetFrame, alloc: ByteBufAllocator): ByteBuf? {
+    fun accumulate(frame: RakNetFrame, alloc: BufferAllocator): Buffer? {
         val split = requireNotNull(frame.split) { "Frame must have SplitInfo" }
         require(split.splitCount in 1..RakNetProtocol.MAX_SPLIT_COUNT) {
             "splitCount ${split.splitCount} exceeds MAX_SPLIT_COUNT=${RakNetProtocol.MAX_SPLIT_COUNT}"
@@ -48,16 +48,16 @@ class FragmentAccumulator {
 
         if (set.fragments[split.splitIndex] != null) return null // duplicate fragment
 
-        set.fragments[split.splitIndex] = frame.payload.retain()
+        set.fragments[split.splitIndex] = frame.payload.copy()
         set.received++
 
         if (set.received < set.splitCount) return null
 
         // All fragments received — reassemble via composite buffer
         sets.remove(split.splitId)
-        val composite = alloc.compositeBuffer(set.splitCount)
+        val composite = alloc.compose()
         for (i in 0 until set.splitCount) {
-            composite.addComponent(true, requireNotNull(set.fragments[i]))
+            composite.extendWith(requireNotNull(set.fragments[i]).send())
         }
         return composite
     }
@@ -71,7 +71,7 @@ class FragmentAccumulator {
     fun removeExpired(now: Long, timeoutMs: Long): Int {
         val expired = sets.values.filter { now - it.createdAt >= timeoutMs }
         for (set in expired) {
-            set.fragments.forEach { it?.release() }
+            set.fragments.forEach { it?.close() }
             sets.remove(set.splitId)
         }
         return expired.size
@@ -80,7 +80,7 @@ class FragmentAccumulator {
     /** Releases all partially accumulated fragments. Call when the connection closes. */
     fun release() {
         sets.values.forEach { set ->
-            set.fragments.forEach { it?.release() }
+            set.fragments.forEach { it?.close() }
         }
         sets.clear()
     }

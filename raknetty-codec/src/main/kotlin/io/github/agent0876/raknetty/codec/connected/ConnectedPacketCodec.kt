@@ -6,8 +6,8 @@ import io.github.agent0876.raknetty.codec.ext.readAddress
 import io.github.agent0876.raknetty.codec.ext.writeAddress
 import io.github.agent0876.raknetty.core.exception.InvalidPacketException
 import io.github.agent0876.raknetty.core.protocol.PacketId
-import io.netty.buffer.ByteBuf
-import io.netty.buffer.ByteBufAllocator
+import io.netty5.buffer.Buffer
+import io.netty5.buffer.BufferAllocator
 
 /**
  * Encode/decode logic for [ConnectedPacket]s.
@@ -19,7 +19,7 @@ object ConnectedPacketCodec {
 
     // ── Decode ────────────────────────────────────────────────────────────────
 
-    fun decode(buf: ByteBuf): ConnectedPacket {
+    fun decode(buf: Buffer): ConnectedPacket {
         return when (val id = buf.readUnsignedByte().toInt()) {
             PacketId.CONNECTION_REQUEST          -> decodeConnectionRequest(buf)
             PacketId.CONNECTION_REQUEST_ACCEPTED -> decodeConnectionRequestAccepted(buf)
@@ -34,14 +34,14 @@ object ConnectedPacketCodec {
         }
     }
 
-    private fun decodeConnectionRequest(buf: ByteBuf): ConnectedPacket.ConnectionRequest {
+    private fun decodeConnectionRequest(buf: Buffer): ConnectedPacket.ConnectionRequest {
         val guid       = buf.readLong()
         val timestamp  = buf.readLong()
         val doSecurity = buf.readBoolean()
         return ConnectedPacket.ConnectionRequest(guid, timestamp, doSecurity)
     }
 
-    private fun decodeConnectionRequestAccepted(buf: ByteBuf): ConnectedPacket.ConnectionRequestAccepted {
+    private fun decodeConnectionRequestAccepted(buf: Buffer): ConnectedPacket.ConnectionRequestAccepted {
         val clientAddress = buf.readAddress()
         val clientIndex   = buf.readUnsignedShort()
         val addresses     = List(INTERNAL_ADDRESS_COUNT) { buf.readAddress() }
@@ -50,7 +50,7 @@ object ConnectedPacketCodec {
         return ConnectedPacket.ConnectionRequestAccepted(clientAddress, clientIndex, addresses, reqTs, accTs)
     }
 
-    private fun decodeNewIncomingConnection(buf: ByteBuf): ConnectedPacket.NewIncomingConnection {
+    private fun decodeNewIncomingConnection(buf: Buffer): ConnectedPacket.NewIncomingConnection {
         val serverAddress    = buf.readAddress()
         val internalAddresses = List(INTERNAL_ADDRESS_COUNT) { buf.readAddress() }
         val reqTs            = buf.readLong()
@@ -60,19 +60,19 @@ object ConnectedPacketCodec {
 
     // ── Encode ────────────────────────────────────────────────────────────────
 
-    fun encode(packet: ConnectedPacket, alloc: ByteBufAllocator): ByteBuf {
-        val buf = alloc.buffer()
+    fun encode(packet: ConnectedPacket, alloc: BufferAllocator): Buffer {
+        val buf = alloc.allocate(256)
         when (packet) {
             is ConnectedPacket.ConnectionRequest -> {
-                buf.writeByte(PacketId.CONNECTION_REQUEST)
+                buf.writeByte(PacketId.CONNECTION_REQUEST.toByte())
                 buf.writeLong(packet.clientGuid)
                 buf.writeLong(packet.requestTimestamp)
                 buf.writeBoolean(packet.doSecurity)
             }
             is ConnectedPacket.ConnectionRequestAccepted -> {
-                buf.writeByte(PacketId.CONNECTION_REQUEST_ACCEPTED)
+                buf.writeByte(PacketId.CONNECTION_REQUEST_ACCEPTED.toByte())
                 buf.writeAddress(packet.clientAddress)
-                buf.writeShort(packet.clientIndex)
+                buf.writeShort(packet.clientIndex.toShort())
                 val addresses = packet.systemAddresses
                 repeat(INTERNAL_ADDRESS_COUNT) { i ->
                     buf.writeAddress(addresses.getOrElse(i) { UNASSIGNED_ADDRESS })
@@ -81,7 +81,7 @@ object ConnectedPacketCodec {
                 buf.writeLong(packet.acceptedTimestamp)
             }
             is ConnectedPacket.NewIncomingConnection -> {
-                buf.writeByte(PacketId.NEW_INCOMING_CONNECTION)
+                buf.writeByte(PacketId.NEW_INCOMING_CONNECTION.toByte())
                 buf.writeAddress(packet.serverAddress)
                 val addresses = packet.internalAddresses
                 repeat(INTERNAL_ADDRESS_COUNT) { i ->
@@ -91,15 +91,15 @@ object ConnectedPacketCodec {
                 buf.writeLong(packet.acceptedTimestamp)
             }
             ConnectedPacket.DisconnectionNotification ->
-                buf.writeByte(PacketId.DISCONNECTION_NOTIFICATION)
+                buf.writeByte(PacketId.DISCONNECTION_NOTIFICATION.toByte())
             ConnectedPacket.DetectLostConnection ->
-                buf.writeByte(PacketId.DETECT_LOST_CONNECTION)
+                buf.writeByte(PacketId.DETECT_LOST_CONNECTION.toByte())
             is ConnectedPacket.ConnectedPing -> {
-                buf.writeByte(PacketId.CONNECTED_PING)
+                buf.writeByte(PacketId.CONNECTED_PING.toByte())
                 buf.writeLong(packet.sendTimestamp)
             }
             is ConnectedPacket.ConnectedPong -> {
-                buf.writeByte(PacketId.CONNECTED_PONG)
+                buf.writeByte(PacketId.CONNECTED_PONG.toByte())
                 buf.writeLong(packet.sendTimestamp)
                 buf.writeLong(packet.pingTimestamp)
             }
