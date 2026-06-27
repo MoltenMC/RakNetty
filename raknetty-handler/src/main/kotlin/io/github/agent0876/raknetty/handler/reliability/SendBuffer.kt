@@ -117,8 +117,10 @@ class SendBuffer(private val mtu: Int, private val config: ConnectionConfig) {
      * timestamp can avoid an extra syscall.
      */
     fun onAck(ranges: RangeList, now: Long = System.currentTimeMillis()) {
+        var windowAdvanced = false
         for (r in ranges.ranges) for (seq in r) {
             val pending = unacked.remove(seq) ?: continue
+            windowAdvanced = true
             // RTT sample
             updateRtt(now - pending.sentAt)
             // AIMD growth
@@ -130,8 +132,10 @@ class SendBuffer(private val mtu: Int, private val config: ConnectionConfig) {
             cwnd = cwnd.coerceAtMost(config.maxUnackedDatagrams.toDouble())
             pending.reliableFrames.forEach { it.payload.close() }
         }
-        // ACKs advancing the window mean we're in a new congestion epoch.
-        congestionReacted = false
+        // Reset congestion epoch only when the window actually advanced.
+        // Spurious/duplicate ACKs must not clear the flag — doing so would
+        // suppress the next real loss reaction within the same epoch.
+        if (windowAdvanced) congestionReacted = false
     }
 
     fun onNak(ranges: RangeList) {
