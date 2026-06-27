@@ -11,7 +11,7 @@ The **handler layer** of RakNetty. Contains the core business logic: handshake n
 ```kotlin
 // Gradle (Kotlin DSL)
 dependencies {
-    implementation("io.github.agent0876.raknetty:raknetty-handler:1.0.1")
+    implementation("io.github.agent0876.raknetty:raknetty-handler:1.0.2")
 }
 ```
 

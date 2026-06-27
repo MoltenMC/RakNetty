@@ -13,14 +13,14 @@ The **entry-point layer** of RakNetty. Provides high-level fluent builders (`Rak
 ```kotlin
 // Gradle (Kotlin DSL)
 dependencies {
-    implementation("io.github.agent0876.raknetty:raknetty-transport:1.0.1")
+    implementation("io.github.agent0876.raknetty:raknetty-transport:1.0.2")
 }
 ```
 
 ```groovy
 // Gradle (Groovy DSL)
 dependencies {
-    implementation 'io.github.agent0876.raknetty:raknetty-transport:1.0.1'
+    implementation 'io.github.agent0876.raknetty:raknetty-transport:1.0.2'
 }
 ```
 
@@ -29,7 +29,7 @@ dependencies {
 <dependency>
     <groupId>io.github.agent0876.raknetty</groupId>
     <artifactId>raknetty-transport</artifactId>
-    <version>1.0.1</version>
+    <version>1.0.2</version>
 </dependency>
 ```
 

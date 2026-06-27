@@ -11,7 +11,7 @@ The **foundation layer** of RakNetty. Contains protocol constants, packet data m
 ```kotlin
 // Gradle (Kotlin DSL)
 dependencies {
-    implementation("io.github.agent0876.raknetty:raknetty-core:1.0.1")
+    implementation("io.github.agent0876.raknetty:raknetty-core:1.0.2")
 }
 ```
 
