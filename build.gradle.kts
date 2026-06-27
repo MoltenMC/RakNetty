@@ -7,7 +7,7 @@ subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
 
     group   = "io.github.moltenmc.raknetty"
-    version = "1.0.2"
+    version = "1.0.3"
 
     repositories {
         mavenCentral()
@@ -35,7 +35,7 @@ subprojects {
             coordinates(
                 groupId    = "io.github.moltenmc.raknetty",
                 artifactId = project.name,
-                version    = "1.0.2"
+                version    = "1.0.3"
             )
 
             pom {
