@@ -2,6 +2,7 @@ package io.github.agent0876.raknetty.codec.connected
 
 import io.github.agent0876.raknetty.codec.connected.ConnectedPacket.Companion.INTERNAL_ADDRESS_COUNT
 import io.github.agent0876.raknetty.codec.ext.UNASSIGNED_ADDRESS
+import io.github.agent0876.raknetty.codec.ext.IPV6_ADDRESS_SIZE
 import io.github.agent0876.raknetty.codec.ext.readAddress
 import io.github.agent0876.raknetty.codec.ext.writeAddress
 import io.github.agent0876.raknetty.core.exception.InvalidPacketException
@@ -61,7 +62,17 @@ object ConnectedPacketCodec {
     // ── Encode ────────────────────────────────────────────────────────────────
 
     fun encode(packet: ConnectedPacket, alloc: BufferAllocator): Buffer {
-        val buf = alloc.allocate(256)
+        // Pre-size to the worst-case IPv6 payload to avoid buffer reallocation.
+        // ConnectionRequestAccepted: 1 + 29 + 2 + 10×29 + 16 = 338B
+        // NewIncomingConnection:     1 + 29      + 10×29 + 16 = 336B
+        val initialSize = when (packet) {
+            is ConnectedPacket.ConnectionRequestAccepted ->
+                1 + IPV6_ADDRESS_SIZE + 2 + INTERNAL_ADDRESS_COUNT * IPV6_ADDRESS_SIZE + 16
+            is ConnectedPacket.NewIncomingConnection ->
+                1 + IPV6_ADDRESS_SIZE + INTERNAL_ADDRESS_COUNT * IPV6_ADDRESS_SIZE + 16
+            else -> 64
+        }
+        val buf = alloc.allocate(initialSize)
         when (packet) {
             is ConnectedPacket.ConnectionRequest -> {
                 buf.writeByte(PacketId.CONNECTION_REQUEST.toByte())
