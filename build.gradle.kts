@@ -6,7 +6,7 @@ plugins {
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
 
-    group   = "io.github.agent0876.raknetty"
+    group   = "io.github.moltenmc.raknetty"
     version = "1.0.2"
 
     repositories {
@@ -33,7 +33,7 @@ subprojects {
             signAllPublications()
 
             coordinates(
-                groupId    = "io.github.agent0876.raknetty",
+                groupId    = "io.github.moltenmc.raknetty",
                 artifactId = project.name,
                 version    = "1.0.2"
             )
