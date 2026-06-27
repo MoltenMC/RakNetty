@@ -58,8 +58,13 @@ class FragmentAccumulator {
         // All fragments received — reassemble via composite buffer
         sets.remove(split.splitId)
         val composite = alloc.compose()
-        for (i in 0 until set.splitCount) {
-            composite.extendWith(requireNotNull(set.fragments[i]).send())
+        try {
+            for (i in 0 until set.splitCount) {
+                composite.extendWith(requireNotNull(set.fragments[i]).send())
+            }
+        } catch (t: Throwable) {
+            composite.close()
+            throw t
         }
         return composite
     }
