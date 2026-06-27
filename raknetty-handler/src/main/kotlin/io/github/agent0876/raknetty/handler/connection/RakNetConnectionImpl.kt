@@ -143,7 +143,17 @@ class RakNetConnectionImpl(
         when {
             frame.reliability.isOrdered -> {
                 receiveBuffer.enqueueOrdered(frame.orderChannel, frame.orderIndex, payload)
-                receiveBuffer.drainOrdered(frame.orderChannel).forEach { dispatchPayload(ctx, it) }
+                val drained = receiveBuffer.drainOrdered(frame.orderChannel)
+                for (buf in drained) {
+                    if (!state.isActive) {
+                        // Connection died mid-drain (e.g. DisconnectionNotification was dispatched).
+                        // Remaining buffers were already removed from ReceiveBuffer by drainOrdered,
+                        // so release() won't reach them — close here to prevent leak.
+                        buf.close()
+                        continue
+                    }
+                    dispatchPayload(ctx, buf)
+                }
             }
             frame.reliability.isSequenced -> {
                 if (receiveBuffer.isNewerSequenced(frame.orderChannel, frame.sequenceIndex)) {
@@ -255,6 +265,11 @@ class RakNetConnectionImpl(
             promise.setSuccess(null)
         } else {
             channel.executor().execute {
+                if (!state.isActive) {
+                    payload.close()
+                    promise.setFailure(ConnectionClosedException(DisconnectReason.INTERNAL_ERROR))
+                    return@execute
+                }
                 doSend(payload, reliability, orderChannel, priority)
                 promise.setSuccess(null)
             }
