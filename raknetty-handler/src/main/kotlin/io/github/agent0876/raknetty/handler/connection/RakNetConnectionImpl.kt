@@ -385,12 +385,24 @@ class RakNetConnectionImpl(
     }
 
     override fun disconnect(reason: DisconnectReason): Future<Void> {
+        if (channel.executor().inEventLoop()) {
+            doDisconnect(reason)
+            return channel.executor().newSucceededFuture(null)
+        }
+        val promise: Promise<Void> = channel.newPromise()
+        channel.executor().execute {
+            doDisconnect(reason)
+            promise.setSuccess(null)
+        }
+        return promise as Future<Void>
+    }
+
+    private fun doDisconnect(reason: DisconnectReason) {
         if (state == ConnectionState.CONNECTED) {
             // IMMEDIATE encodes and flushes directly — no manual flush needed before teardown.
             sendConnectedPacket(ConnectedPacket.DisconnectionNotification, Reliability.UNRELIABLE, RakNetPriority.IMMEDIATE)
         }
         forceDisconnect(reason)
-        return channel.executor().newSucceededFuture(null)
     }
 
     private fun forceDisconnect(reason: DisconnectReason) {
