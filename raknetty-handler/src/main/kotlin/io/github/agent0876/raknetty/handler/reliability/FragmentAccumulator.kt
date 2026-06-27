@@ -46,7 +46,9 @@ class FragmentAccumulator {
             FragmentSet(split.splitId, split.splitCount, System.currentTimeMillis())
         }
 
-        if (set.fragments[split.splitIndex] != null) return null // duplicate fragment
+        if (split.splitCount != set.splitCount) return null          // inconsistent set — drop
+        if (split.splitIndex !in 0 until set.splitCount) return null // out-of-range index — drop
+        if (set.fragments[split.splitIndex] != null) return null     // duplicate fragment
 
         set.fragments[split.splitIndex] = frame.payload.copy()
         set.received++

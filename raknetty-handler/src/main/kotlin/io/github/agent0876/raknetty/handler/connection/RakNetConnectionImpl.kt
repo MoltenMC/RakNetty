@@ -111,7 +111,7 @@ class RakNetConnectionImpl(
             is RakNetDatagram.Data -> {
                 sendBuffer.ackDatagramReceived(datagram.sequenceNumber)
                 receiveBuffer.onDatagramArrived(datagram.sequenceNumber)
-                    ?.let { (s, e) -> sendBuffer.nakRange(s, e) }
+                    .forEach { (s, e) -> sendBuffer.nakRange(s, e) }
                 for (frame in datagram.frames) processFrame(ctx, frame)
             }
         }

@@ -1,11 +1,10 @@
 package io.github.agent0876.raknetty.handler.reliability
 
+import io.github.agent0876.raknetty.core.util.SequenceNumber
 import io.netty5.buffer.BufferAllocator
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ReceiveBufferTest {
@@ -16,24 +15,41 @@ class ReceiveBufferTest {
 
     @Test fun `in-order datagram produces no NAK`() {
         val buf = ReceiveBuffer()
-        assertNull(buf.onDatagramArrived(0))
-        assertNull(buf.onDatagramArrived(1))
-        assertNull(buf.onDatagramArrived(2))
+        assertTrue(buf.onDatagramArrived(0).isEmpty())
+        assertTrue(buf.onDatagramArrived(1).isEmpty())
+        assertTrue(buf.onDatagramArrived(2).isEmpty())
     }
 
     @Test fun `gap in sequence generates NAK range`() {
         val buf = ReceiveBuffer()
-        assertNull(buf.onDatagramArrived(0))
-        val nak = buf.onDatagramArrived(5)
-        assertNotNull(nak)
-        assertEquals(1, nak.first)
-        assertEquals(4, nak.second)
+        assertTrue(buf.onDatagramArrived(0).isEmpty())
+        val naks = buf.onDatagramArrived(5)
+        assertEquals(1, naks.size)
+        assertEquals(1, naks[0].first)
+        assertEquals(4, naks[0].second)
     }
 
     @Test fun `out-of-order old datagram produces no NAK`() {
         val buf = ReceiveBuffer()
         buf.onDatagramArrived(5) // jump ahead
-        assertNull(buf.onDatagramArrived(3)) // old — should be accepted silently
+        assertTrue(buf.onDatagramArrived(3).isEmpty()) // old — should be accepted silently
+    }
+
+    @Test fun `gap spanning 24-bit wrap boundary produces two NAK ranges`() {
+        val buf = ReceiveBuffer()
+        // Advance nextExpected to MAX in a few large jumps (each < HALF so isGreaterThan stays true).
+        // HALF = 8_388_608 (private); use literal values that satisfy diff < HALF.
+        val half = (SequenceNumber.MAX + 1) / 2   // 8_388_608
+        buf.onDatagramArrived(half - 2)               // jump; nextExpected = half - 1
+        buf.onDatagramArrived(half - 1)               // in order; nextExpected = half
+        buf.onDatagramArrived(SequenceNumber.MAX - 1) // jump; nextExpected = MAX
+        // nextExpected = MAX; receive seqNum=2 — gap [MAX, 0, 1] spans the wrap boundary.
+        val naks = buf.onDatagramArrived(2)
+        assertEquals(2, naks.size)
+        assertEquals(SequenceNumber.MAX, naks[0].first)
+        assertEquals(SequenceNumber.MAX, naks[0].second)
+        assertEquals(0, naks[1].first)
+        assertEquals(1, naks[1].second)
     }
 
     // ── Reliable deduplication ─────────────────────────────────────────────────

@@ -68,6 +68,30 @@ class FragmentAccumulatorTest {
         result.close()
     }
 
+    @Test fun `splitIndex out of range is silently dropped`() {
+        val acc = FragmentAccumulator()
+        // splitCount=2 but splitIndex=5 — would have been AIOOBE before the fix
+        assertNull(acc.accumulate(frame(5, 2, 5, byteArrayOf(1)), alloc))
+        // Valid fragments for the same splitId still complete normally
+        acc.accumulate(frame(5, 2, 0, byteArrayOf(10)), alloc)
+        val result = acc.accumulate(frame(5, 2, 1, byteArrayOf(20)), alloc)
+        assertNotNull(result)
+        result.close()
+    }
+
+    @Test fun `inconsistent splitCount for existing set is silently dropped`() {
+        val acc = FragmentAccumulator()
+        // First fragment establishes splitCount=3
+        acc.accumulate(frame(6, 3, 0, byteArrayOf(1)), alloc)
+        // Second fragment claims splitCount=5 — would have caused AIOOBE on splitIndex>=3
+        assertNull(acc.accumulate(frame(6, 5, 3, byteArrayOf(99)), alloc))
+        // Normal completion with the original splitCount=3
+        acc.accumulate(frame(6, 3, 1, byteArrayOf(2)), alloc)
+        val result = acc.accumulate(frame(6, 3, 2, byteArrayOf(3)), alloc)
+        assertNotNull(result)
+        result.close()
+    }
+
     @Test fun `two concurrent split sets are independent`() {
         val acc = FragmentAccumulator()
         acc.accumulate(frame(10, 2, 0, byteArrayOf(1)), alloc)

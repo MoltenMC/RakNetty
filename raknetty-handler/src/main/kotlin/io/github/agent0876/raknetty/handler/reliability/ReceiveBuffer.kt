@@ -22,25 +22,32 @@ class ReceiveBuffer {
 
     /**
      * Records arrival of a datagram with [seqNum].
-     * Returns a [Pair] (start, end) of the NAK range if a gap was detected, or `null`.
+     * Returns a list of (start, end) NAK ranges if a gap was detected, or an empty list.
+     * Two ranges are returned when the gap spans the 24-bit sequence-number wrap boundary
+     * (e.g. gap [16_777_213..0] is split into [16_777_213..MAX] and [0..0]).
      *
      * Note: this simplified implementation does not handle out-of-order arrivals
      * that arrive before the gap is filled (they are treated as "old"). The reliable
      * message deduplication layer handles the actual content correctness.
      */
-    fun onDatagramArrived(seqNum: Int): Pair<Int, Int>? {
+    fun onDatagramArrived(seqNum: Int): List<Pair<Int, Int>> {
         return when {
             seqNum == nextExpectedDatagramSeq -> {
                 nextExpectedDatagramSeq = SequenceNumber.increment(seqNum)
-                null
+                emptyList()
             }
             SequenceNumber.isGreaterThan(seqNum, nextExpectedDatagramSeq) -> {
                 val nakStart = nextExpectedDatagramSeq
                 val nakEnd   = SequenceNumber.increment(seqNum, -1)
                 nextExpectedDatagramSeq = SequenceNumber.increment(seqNum)
-                Pair(nakStart, nakEnd)
+                if (nakEnd < nakStart) {
+                    // Gap spans the 24-bit wrap boundary: split into two contiguous ranges.
+                    listOf(Pair(nakStart, SequenceNumber.MAX), Pair(0, nakEnd))
+                } else {
+                    listOf(Pair(nakStart, nakEnd))
+                }
             }
-            else -> null  // old or duplicate datagram — still process its frames for dedup
+            else -> emptyList()  // old or duplicate datagram — still process its frames for dedup
         }
     }
 
