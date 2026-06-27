@@ -112,12 +112,27 @@ class RakNetConnectionImpl(
                 sendBuffer.ackDatagramReceived(datagram.sequenceNumber)
                 receiveBuffer.onDatagramArrived(datagram.sequenceNumber)
                     .forEach { (s, e) -> sendBuffer.nakRange(s, e) }
-                for (frame in datagram.frames) processFrame(ctx, frame)
+                var i = 0
+                try {
+                    while (i < datagram.frames.size) {
+                        processFrame(ctx, datagram.frames[i], now)
+                        i++
+                    }
+                } catch (t: Throwable) {
+                    for (j in (i + 1) until datagram.frames.size) {
+                        try {
+                            datagram.frames[j].payload.close()
+                        } catch (e: Exception) {
+                            log.debug("Failed to release frame payload during exception recovery", e)
+                        }
+                    }
+                    throw t
+                }
             }
         }
     }
 
-    private fun processFrame(ctx: ChannelHandlerContext, frame: RakNetFrame) {
+    private fun processFrame(ctx: ChannelHandlerContext, frame: RakNetFrame, now: Long) {
         // Reliable dedup
         if (frame.reliability.isReliable) {
             if (!receiveBuffer.isNewReliable(frame.reliableIndex)) {
@@ -129,8 +144,8 @@ class RakNetConnectionImpl(
 
         // Fragment reassembly
         val payload: Buffer = if (frame.split != null) {
-            val result = fragmentAccum.accumulate(frame, channel.bufferAllocator())
-            frame.payload.close()
+            val result = fragmentAccum.accumulate(frame, channel.bufferAllocator(), now)
+            // DO NOT close frame.payload here; FragmentAccumulator has taken ownership!
             result ?: return
         } else {
             frame.payload
@@ -144,15 +159,25 @@ class RakNetConnectionImpl(
             frame.reliability.isOrdered -> {
                 receiveBuffer.enqueueOrdered(frame.orderChannel, frame.orderIndex, payload)
                 val drained = receiveBuffer.drainOrdered(frame.orderChannel)
-                for (buf in drained) {
-                    if (!state.isActive) {
-                        // Connection died mid-drain (e.g. DisconnectionNotification was dispatched).
-                        // Remaining buffers were already removed from ReceiveBuffer by drainOrdered,
-                        // so release() won't reach them — close here to prevent leak.
-                        buf.close()
-                        continue
+                var i = 0
+                try {
+                    while (i < drained.size) {
+                        val buf = drained[i]
+                        if (!state.isActive) {
+                            buf.close()
+                        } else {
+                            dispatchPayload(ctx, buf)
+                        }
+                        i++
                     }
-                    dispatchPayload(ctx, buf)
+                } finally {
+                    for (j in i until drained.size) {
+                        try {
+                            drained[j].close()
+                        } catch (e: Exception) {
+                            log.debug("Failed to release drained buffer during exception recovery", e)
+                        }
+                    }
                 }
             }
             frame.reliability.isSequenced -> {
@@ -330,12 +355,10 @@ class RakNetConnectionImpl(
         val totalLen   = payload.readableBytes()
         val splitCount = (totalLen + chunkSize - 1) / chunkSize
         var splitIndex = 0
-        var offset     = payload.readerOffset()
 
-        while (offset < payload.writerOffset()) {
-            val len   = minOf(chunkSize, payload.writerOffset() - offset)
-            val chunk = payload.copy(offset, len)
-            offset += len
+        while (payload.readableBytes() > 0) {
+            val len   = minOf(chunkSize, payload.readableBytes())
+            val chunk = payload.readSplit(len)
             sendBuffer.enqueue(RakNetFrame(
                 reliability   = reliability,
                 reliableIndex = if (reliability.isReliable) sendBuffer.nextReliableIndex() else 0,
@@ -361,13 +384,11 @@ class RakNetConnectionImpl(
         val totalLen   = payload.readableBytes()
         val splitCount = (totalLen + chunkSize - 1) / chunkSize
         var splitIndex = 0
-        var offset     = payload.readerOffset()
         val now        = System.currentTimeMillis()
 
-        while (offset < payload.writerOffset()) {
-            val len   = minOf(chunkSize, payload.writerOffset() - offset)
-            val chunk = payload.copy(offset, len)
-            offset += len
+        while (payload.readableBytes() > 0) {
+            val len   = minOf(chunkSize, payload.readableBytes())
+            val chunk = payload.readSplit(len)
             val frame = RakNetFrame(
                 reliability   = reliability,
                 reliableIndex = if (reliability.isReliable) sendBuffer.nextReliableIndex() else 0,

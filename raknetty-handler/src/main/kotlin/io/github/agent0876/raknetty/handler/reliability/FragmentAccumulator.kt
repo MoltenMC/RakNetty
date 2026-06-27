@@ -37,20 +37,30 @@ class FragmentAccumulator {
      * [frame.payload] is retained internally; callers must still release [frame.payload]
      * themselves after this call returns.
      */
-    fun accumulate(frame: RakNetFrame, alloc: BufferAllocator): Buffer? {
+    fun accumulate(frame: RakNetFrame, alloc: BufferAllocator, now: Long = System.currentTimeMillis()): Buffer? {
         val split = requireNotNull(frame.split) { "Frame must have SplitInfo" }
-        require(split.splitCount in 1..RakNetProtocol.MAX_SPLIT_COUNT) {
-            "splitCount ${split.splitCount} exceeds MAX_SPLIT_COUNT=${RakNetProtocol.MAX_SPLIT_COUNT}"
+        if (split.splitCount !in 1..RakNetProtocol.MAX_SPLIT_COUNT) {
+            frame.payload.close()
+            throw IllegalArgumentException("splitCount ${split.splitCount} exceeds MAX_SPLIT_COUNT=${RakNetProtocol.MAX_SPLIT_COUNT}")
         }
         val set = sets.getOrPut(split.splitId) {
-            FragmentSet(split.splitId, split.splitCount, System.currentTimeMillis())
+            FragmentSet(split.splitId, split.splitCount, now)
         }
 
-        if (split.splitCount != set.splitCount) return null          // inconsistent set — drop
-        if (split.splitIndex !in 0 until set.splitCount) return null // out-of-range index — drop
-        if (set.fragments[split.splitIndex] != null) return null     // duplicate fragment
+        if (split.splitCount != set.splitCount) {
+            frame.payload.close()
+            return null          // inconsistent set — drop
+        }
+        if (split.splitIndex !in 0 until set.splitCount) {
+            frame.payload.close()
+            return null // out-of-range index — drop
+        }
+        if (set.fragments[split.splitIndex] != null) {
+            frame.payload.close()     // duplicate fragment
+            return null
+        }
 
-        set.fragments[split.splitIndex] = frame.payload.copy()
+        set.fragments[split.splitIndex] = frame.payload
         set.received++
 
         if (set.received < set.splitCount) return null

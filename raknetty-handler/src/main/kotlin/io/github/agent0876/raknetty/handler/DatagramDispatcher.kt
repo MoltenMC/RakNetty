@@ -29,15 +29,15 @@ class DatagramDispatcher(
                 try {
                     val datagram = RakNetDatagramCodec.decode(buf, ctx.bufferAllocator())
                     conn.onDatagramReceived(ctx, datagram)
-                } catch (e: InvalidPacketException) {
-                    log.warn("Invalid online datagram from {}: {}", sender, e.message)
+                } catch (e: Exception) {
+                    log.warn("Failed to decode or process online datagram from {}: {}", sender, e.message, e)
                 }
             } else {
                 try {
                     val packet = OfflinePacketCodec.decode(buf) ?: return
                     ctx.fireChannelRead(AddressedOfflinePacket(packet, sender))
-                } catch (e: InvalidPacketException) {
-                    log.warn("Invalid offline packet from {}: {}", sender, e.message)
+                } catch (e: Exception) {
+                    log.warn("Failed to decode offline packet from {}: {}", sender, e.message, e)
                 }
             }
         } finally {
