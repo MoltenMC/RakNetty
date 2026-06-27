@@ -31,14 +31,14 @@ RakNetty is a Netty-based Kotlin implementation of the RakNet reliable-UDP proto
 | `raknetty-core` | Protocol constants, type model, utility math. No Netty pipeline code. |
 | `raknetty-codec` | Pure encode/decode logic (no `ChannelHandler`). Depends on `raknetty-core`. |
 | `raknetty-handler` | Netty `ChannelHandler`s: reliability layer, handshake state machines, connection registry. |
-| `raknetty-transport` *(planned)* | `RakNetServerBootstrap` / `RakNetClientBootstrap` — user-facing API. |
+| `raknetty-transport` | `RakNetServerBootstrap` / `RakNetClientBootstrap` — user-facing API. |
 
 ## Key Package Layout
 
 ```
 com.raknetty.core
 ├── protocol/    PacketId (all message IDs + OFFLINE_MESSAGE_ID magic), Reliability enum (8 modes),
-│                RakNetProtocol (version=11, MTU probes, max channels)
+│                RakNetProtocol (version=11, MTU probes, max channels), RakNetPriority
 ├── packet/      RakNetFrame (per-frame model + wireSize()), SplitInfo, RakNetDatagram (sealed: Data|Ack|Nak)
 ├── connection/  ConnectionState, DisconnectReason, RakNetConnection interface
 ├── util/        RangeList (sorted merged ranges, encode/decode for ACK/NAK wire format),
@@ -96,6 +96,11 @@ com.raknetty.handler
     ├── SendBuffer              — outbound: frame queuing, MTU packing, unacked window, retransmit
     ├── ReceiveBuffer           — inbound: datagram gap→NAK, reliable dedup, ordered/sequenced delivery
     └── FragmentAccumulator     — split-packet reassembly into composite ByteBuf (zero-copy)
+
+com.raknetty.transport
+├── RakNetServerBootstrap       — fluent builder: bind UDP port, configure handler + registry
+├── RakNetClientBootstrap       — fluent builder: performs full handshake, returns Future<Void>
+└── SimpleRakNetHandler         — convenience abstract class; extend instead of ChannelHandler directly
 ```
 
 ## Handler Pipeline (Server)
@@ -125,14 +130,71 @@ Server                          Client
   fireUserEventTriggered(RakNetEvent.Connected)  ← both sides
 ```
 
+### Connection States
+
+```
+UNCONNECTED → CONNECTING → HANDSHAKING → CONNECTED → DISCONNECTING → DISCONNECTED
+```
+
+`ConnectionState.isActive` returns `true` for `CONNECTING`, `HANDSHAKING`, and `CONNECTED`.
+`forceDisconnect()` gates on `state == DISCONNECTED` to prevent double-release.
+
+## SimpleRakNetHandler
+
+The primary user-facing entry point. Extend this instead of implementing `ChannelHandler` directly:
+
+```kotlin
+abstract class SimpleRakNetHandler {
+    open fun onConnect(ctx, connection: RakNetConnection) {}
+    open fun onMessage(ctx, connection: RakNetConnection, payload: Buffer) {}  // payload auto-released after return
+    open fun onDisconnect(ctx, connection: RakNetConnection, reason: DisconnectReason) {}
+}
+```
+
+**Critical**: `onMessage` payload is released by a `finally` block in `SimpleRakNetHandler.messageReceived`
+immediately after `onMessage` returns. Call `payload.copy()` if you need to hold it past the callback.
+
 ## Important Invariants
 
 - **Sequence numbers are 24-bit** (0..16_777_215). Always use `SequenceNumber.*` helpers; never compare raw `Int` values across wrap-around boundaries.
 - **ByteBuf lifecycle**: `RakNetFrame.payload` is owned by the holder and must be `release()`d. The codec allocates new buffers on decode; call `RakNetDatagram.Data.release()` after processing.
 - **Offline vs online discrimination**: first byte `and 0x80 != 0` → online datagram (ACK/NAK/Data). Anything else → offline packet. `RakNetDatagramCodec.isOnlineDatagram(firstByte)` encodes this.
 - **IPv4 address bytes are XOR'd with 0xFF** on the wire (RakNet spec). `BufExtensions.readAddress / writeAddress` handles this.
-- **MTU for OCReq1** is not encoded in the payload — it is inferred from `totalPayloadSize + 28` (20 IP + 8 UDP headers). The codec expects the full un-consumed `ByteBuf` for this reason.
+- **MTU for OCReq1** is not encoded in the payload — it is inferred from `totalPayloadSize + 28` (20 IP + 8 UDP headers). The codec captures `buf.readableBytes()` *before* reading the ID byte for this reason.
 - **`SendBuffer` thread safety**: all methods must be called from the connection's `EventLoop` thread. The ticker (`scheduleAtFixedRate`) already guarantees this.
 - **`RakNetConnectionImpl.state`**: declared `@Volatile override var`. External callers (handshake handlers) set it via direct property assignment (`conn.state = …`) — do NOT add a `fun setState()` as it clashes with the JVM setter signature.
 - **Application message IDs**: bytes `0x00–0x7F` are reserved for internal RakNet messages; `0x80+` are user application data. `dispatchPayload()` uses this boundary to decide whether to decode as `ConnectedPacket` or fire as `RakNetPacket`.
 - **`RakNetConnection.send()` ownership**: the callee takes ownership of `payload`. After calling `send()`, callers must NOT release or read the buffer.
+- **`datagram.release()` is intentionally NOT called** in `onDatagramReceived` — each frame's payload is managed individually inside `processFrame` to avoid double-close.
+
+## Thread Safety
+
+All `RakNetConnectionImpl` mutation (send, receive, tick) must happen on the connection's `EventLoop` thread.
+
+- **`send()`**: safe to call from any thread — marshals to the EventLoop if not already on it.
+  However, there is a race: if the connection disconnects between the `state.isActive` check and
+  the submitted `execute {}` block running, the payload is leaked. Always re-check `state.isActive`
+  inside the lambda if calling from off the EventLoop.
+- **`disconnect()`**: currently calls `doSend()` and `forceDisconnect()` directly without
+  marshalling to the EventLoop. Must be called from the EventLoop thread or from the same thread
+  that owns the connection, to avoid concurrent access to `SendBuffer`.
+
+## Known Latent Bugs
+
+These are confirmed correctness issues present in the codebase that have not yet been fixed:
+
+1. **NAK range wrap-around crash** (`ReceiveBuffer.kt:38`): When a datagram gap spans the 24-bit
+   sequence-number wrap boundary (e.g., `nextExpected = 16_777_213`, received `seqNum = 2`),
+   `onDatagramArrived` returns `Pair(nakStart=16_777_213, nakEnd=1)`. `RangeList.addRange` calls
+   `require(start <= end)` which throws `IllegalArgumentException`. `DatagramDispatcher` only
+   catches `InvalidPacketException`, so this propagates uncaught and crashes the channel.
+   Fix: when `nakEnd < nakStart`, split into two ranges `[nakStart..MAX]` and `[0..nakEnd]`.
+
+2. **`FragmentAccumulator` splitIndex out of bounds** (`FragmentAccumulator.kt:49`): `splitIndex`
+   is never validated against `splitCount` before the array access `set.fragments[split.splitIndex]`.
+   A single frame with `splitIndex >= splitCount` (malformed or from a buggy sender) throws
+   uncaught `ArrayIndexOutOfBoundsException`. Also, if two fragments arrive with the same `splitId`
+   but different `splitCount` values, the second fragment's `splitIndex` may exceed the first
+   fragment's array size.
+   Fix: add `require(split.splitIndex in 0 until split.splitCount)` and
+   `require(split.splitCount == set.splitCount)` in `accumulate()`.
