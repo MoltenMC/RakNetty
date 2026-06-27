@@ -7,7 +7,6 @@ import io.github.agent0876.raknetty.core.util.readUnsignedMediumLE
 import io.github.agent0876.raknetty.core.util.writeMediumLE
 import io.netty5.buffer.Buffer
 import io.netty5.buffer.BufferAllocator
-import java.nio.ByteBuffer
 
 /**
  * Encodes and decodes [RakNetFrame]s within a data datagram payload.
@@ -81,8 +80,9 @@ object RakNetFrameCodec {
             out.writeInt(it.splitIndex)
         }
         val len = frame.payload.readableBytes()
-        val temp = ByteArray(len)
-        frame.payload.copyInto(frame.payload.readerOffset(), temp, 0, len)
-        out.writeBytes(ByteBuffer.wrap(temp, 0, len))
+        val writePos = out.writerOffset()
+        out.ensureWritable(len)
+        frame.payload.copyInto(frame.payload.readerOffset(), out, writePos, len)
+        out.writerOffset(writePos + len)
     }
 }
