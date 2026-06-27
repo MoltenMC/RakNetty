@@ -8,7 +8,7 @@ subprojects {
     apply(plugin = "com.vanniktech.maven.publish")
 
     group   = "io.github.agent0876.raknetty"
-    version = "1.0.0"
+    version = "1.0.1"
 
     repositories {
         mavenCentral()
@@ -33,7 +33,7 @@ subprojects {
         coordinates(
             groupId    = "io.github.agent0876.raknetty",
             artifactId = project.name,
-            version    = "1.0.0"
+            version    = "1.0.1"
         )
 
         pom {
