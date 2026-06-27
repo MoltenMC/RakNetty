@@ -41,7 +41,7 @@ subprojects {
             pom {
                 name.set(project.name)
                 description.set("Netty-based RakNet protocol implementation in Kotlin")
-                url.set("https://github.com/Agent0876/RakNetty")
+                url.set("https://github.com/MoltenMC/RakNetty")
 
                 licenses {
                     license {
@@ -59,9 +59,9 @@ subprojects {
                 }
 
                 scm {
-                    connection.set("scm:git:git://github.com/Agent0876/RakNetty.git")
-                    developerConnection.set("scm:git:ssh://github.com/Agent0876/RakNetty.git")
-                    url.set("https://github.com/Agent0876/RakNetty")
+                    connection.set("scm:git:git://github.com/MoltenMC/RakNetty.git")
+                    developerConnection.set("scm:git:ssh://github.com/MoltenMC/RakNetty.git")
+                    url.set("https://github.com/MoltenMC/RakNetty")
                 }
             }
         }
