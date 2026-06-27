@@ -1,5 +1,7 @@
 package io.github.agent0876.raknetty.transport
 
+import io.github.agent0876.raknetty.codec.offline.OfflinePacket
+import io.github.agent0876.raknetty.handler.AddressedOfflinePacket
 import io.github.agent0876.raknetty.handler.ConnectionRegistry
 import io.github.agent0876.raknetty.handler.DatagramDispatcher
 import io.github.agent0876.raknetty.handler.connection.ConnectionConfig
@@ -74,16 +76,41 @@ class RakNetClientBootstrap {
                     }
                     ctx.fireChannelInboundEvent(evt)
                 }
+
+                override fun channelRead(ctx: ChannelHandlerContext, msg: Any) {
+                    if (msg is AddressedOfflinePacket && !connectPromise.isDone) {
+                        val packet = msg.packet
+                        if (packet is OfflinePacket.IncompatibleProtocolVersion ||
+                            packet is OfflinePacket.NoFreeIncomingConnections ||
+                            packet is OfflinePacket.ConnectionBanned ||
+                            packet is OfflinePacket.AlreadyConnected
+                        ) {
+                            val reason = when (packet) {
+                                is OfflinePacket.IncompatibleProtocolVersion -> "Incompatible protocol version"
+                                is OfflinePacket.NoFreeIncomingConnections -> "Server is full"
+                                is OfflinePacket.ConnectionBanned -> "Banned from server"
+                                is OfflinePacket.AlreadyConnected -> "Already connected"
+                            }
+                            connectPromise.setFailure(ConnectException("RakNet connection failed: $reason"))
+                            ctx.channel().close()
+                        }
+                    }
+                    ctx.fireChannelRead(msg)
+                }
             }
         )
 
-        channel.executor().schedule({
+        val timeoutTask = channel.executor().schedule({
             if (!connectPromise.isDone) {
                 connectPromise.setFailure(ConnectException("RakNet handshake timed out after ${config.connectionTimeout} ms"))
                 channel.close()
                 if (ownedGroup) resolvedGroup.shutdownGracefully()
             }
         }, config.connectionTimeout, TimeUnit.MILLISECONDS)
+
+        connectPromise.asFuture().addListener { _ ->
+            timeoutTask.cancel()
+        }
 
         channel.executor().execute {
             handshakeHandler.connect(

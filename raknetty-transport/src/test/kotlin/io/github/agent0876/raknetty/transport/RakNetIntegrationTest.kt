@@ -158,4 +158,32 @@ class RakNetIntegrationTest {
 
         serverChannel3.close().asStage().sync()
     }
+
+    @Test fun `client connect fails immediately when server is full`() {
+        val serverFuture = RakNetServerBootstrap()
+            .group(group)
+            .serverGuid(500L)
+            .maxConnections(0)
+            .handler(object : SimpleRakNetHandler() {})
+            .bind(0).asStage().sync()
+
+        val serverChannel = serverFuture.getNow()
+        val serverPort = (serverChannel.localAddress() as InetSocketAddress).port
+
+        val connectFuture = RakNetClientBootstrap()
+            .group(group)
+            .clientGuid(501L)
+            .handler(object : SimpleRakNetHandler() {})
+            .connect("127.0.0.1", serverPort)
+
+        val terminated = connectFuture.asStage().await(3, TimeUnit.SECONDS)
+        assertTrue(terminated, "Handshake resolver did not terminate quickly on rejection")
+
+        val cause = connectFuture.cause()
+        assertNotNull(cause)
+        assertTrue(cause is java.net.ConnectException)
+        assertTrue(cause.message!!.contains("Server is full"), "Error message should mention 'Server is full' but was '${cause.message}'")
+
+        serverChannel.close().asStage().sync()
+    }
 }
