@@ -8,7 +8,7 @@ object RakNetProtocol {
     const val MAX_ORDER_CHANNELS: Int = 32
 
     /** Maximum number of fragments a single message can be split into. */
-    const val MAX_SPLIT_COUNT: Int = 128
+    const val MAX_SPLIT_COUNT: Int = 1024
 
     /**
      * MTU sizes probed during handshake, in descending order.

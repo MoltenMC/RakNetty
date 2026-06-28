@@ -41,7 +41,7 @@ class FragmentAccumulator {
         val split = requireNotNull(frame.split) { "Frame must have SplitInfo" }
         if (split.splitCount !in 1..RakNetProtocol.MAX_SPLIT_COUNT) {
             frame.payload.close()
-            throw IllegalArgumentException("splitCount ${split.splitCount} exceeds MAX_SPLIT_COUNT=${RakNetProtocol.MAX_SPLIT_COUNT}")
+            return null
         }
         val set = sets.getOrPut(split.splitId) {
             FragmentSet(split.splitId, split.splitCount, now)
